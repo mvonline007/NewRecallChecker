@@ -14,6 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
+const APP_VERSION = "1.0.3";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -147,6 +148,14 @@ function Pill({ children }) {
   return (
     <span className="inline-flex items-center rounded-full border border-neutral-700/60 bg-neutral-900/40 px-2 py-0.5 text-xs text-neutral-200">
       {children}
+    </span>
+  );
+}
+
+function NewPill() {
+  return (
+    <span className="inline-flex items-center rounded-full border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-200">
+      NEW
     </span>
   );
 }
@@ -548,6 +557,7 @@ export default function RappelConsoRssViewer() {
               <Pill>New: {newIds.length}</Pill>
               <Pill>Filtered: {filtered.length}</Pill>
               <Pill>With images: {withImagesCount}</Pill>
+              <Pill>v{APP_VERSION}</Pill>
               <Pill>
                 Distributeurs: {detailsProgress.loaded}/{detailsProgress.total}
                 {detailsProgress.errors ? ` (err ${detailsProgress.errors})` : ""}
@@ -699,6 +709,7 @@ export default function RappelConsoRssViewer() {
                   {visible.map((it) => {
                     const det = detailsMap[it.id];
                     const distLabel = pickShortDistributorLabel(det?.distributeursList, det?.distributeursRaw);
+                    const showNew = it.isNew;
                     return (
                       <div
                         key={it.id}
@@ -715,19 +726,24 @@ export default function RappelConsoRssViewer() {
                       >
                         <div className="relative aspect-[16/10] w-full overflow-hidden">
                           <ImageWithFallback src={it.enclosureUrl} alt={it.title} />
-                          {it.link && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setFicheUrl(it.link);
-                                setFicheOpen(true);
-                              }}
-                              className="absolute right-2 top-2 rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
-                              title="Open fiche inside app"
-                            >
-                              Fiche
-                            </button>
+                          {(showNew || it.link) && (
+                            <div className="absolute right-2 top-2 flex items-center gap-2">
+                              {showNew && <NewPill />}
+                              {it.link && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFicheUrl(it.link);
+                                    setFicheOpen(true);
+                                  }}
+                                  className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
+                                  title="Open fiche inside app"
+                                >
+                                  Fiche
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
 
@@ -738,7 +754,6 @@ export default function RappelConsoRssViewer() {
                           <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
                             {it.pubDate && <Pill>{fmtDateDMY(it.pubDate)}</Pill>}
                             {it.enclosureUrl && <Pill>image</Pill>}
-                            {it.isNew && <Pill>NEW</Pill>}
                             {distLabel && <Pill>{distLabel}</Pill>}
                           </div>
                           <div className="text-xs text-neutral-300/80 line-clamp-3">{it.descriptionText}</div>
@@ -786,7 +801,6 @@ export default function RappelConsoRssViewer() {
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
                               {it.pubDate && <Pill>{fmtDateDMY(it.pubDate)}</Pill>}
                               {it.enclosureUrl && <Pill>image</Pill>}
-                              {it.isNew && <Pill>NEW</Pill>}
                               {distLabel && <Pill>{distLabel}</Pill>}
                             </div>
                             <div className="mt-2 text-sm text-neutral-300/90 line-clamp-3">{it.descriptionText}</div>
@@ -848,7 +862,6 @@ export default function RappelConsoRssViewer() {
               {selected.pubDate && <Pill>{fmtDateDMY(selected.pubDate)}</Pill>}
               {selected.pubDateISO && <Pill>{fmtISODateDMY(selected.pubDateISO)}</Pill>}
               {selected.enclosureUrl && <Pill>image</Pill>}
-              {selected.isNew && <Pill>NEW</Pill>}
               {detailsMap[selected.id]?.distributeursRaw && (
                 <Pill>
                   Distributeur: {pickShortDistributorLabel(detailsMap[selected.id]?.distributeursList, detailsMap[selected.id]?.distributeursRaw)}
