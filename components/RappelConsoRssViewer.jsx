@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.2";
+const APP_VERSION = "1.0.3";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -706,11 +706,10 @@ export default function RappelConsoRssViewer() {
             <div className="mt-6">
               {mode === "gallery" ? (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {visible.map((it, idx) => {
+                  {visible.map((it) => {
                     const det = detailsMap[it.id];
                     const distLabel = pickShortDistributorLabel(det?.distributeursList, det?.distributeursRaw);
-                    const forceLastNew = idx === visible.length - 1;
-                    const showNew = it.isNew || forceLastNew;
+                    const showNew = it.isNew;
                     return (
                       <div
                         key={it.id}
@@ -727,24 +726,24 @@ export default function RappelConsoRssViewer() {
                       >
                         <div className="relative aspect-[16/10] w-full overflow-hidden">
                           <ImageWithFallback src={it.enclosureUrl} alt={it.title} />
-                          {showNew && (
-                            <div className="absolute left-2 top-2">
-                              <NewPill />
+                          {(showNew || it.link) && (
+                            <div className="absolute right-2 top-2 flex items-center gap-2">
+                              {showNew && <NewPill />}
+                              {it.link && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFicheUrl(it.link);
+                                    setFicheOpen(true);
+                                  }}
+                                  className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
+                                  title="Open fiche inside app"
+                                >
+                                  Fiche
+                                </button>
+                              )}
                             </div>
-                          )}
-                          {it.link && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setFicheUrl(it.link);
-                                setFicheOpen(true);
-                              }}
-                              className="absolute right-2 top-2 rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
-                              title="Open fiche inside app"
-                            >
-                              Fiche
-                            </button>
                           )}
                         </div>
 
@@ -755,7 +754,6 @@ export default function RappelConsoRssViewer() {
                           <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
                             {it.pubDate && <Pill>{fmtDateDMY(it.pubDate)}</Pill>}
                             {it.enclosureUrl && <Pill>image</Pill>}
-                            {showNew && <NewPill />}
                             {distLabel && <Pill>{distLabel}</Pill>}
                           </div>
                           <div className="text-xs text-neutral-300/80 line-clamp-3">{it.descriptionText}</div>
@@ -792,11 +790,9 @@ export default function RappelConsoRssViewer() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {visible.map((it, idx) => {
+                  {visible.map((it) => {
                     const det = detailsMap[it.id];
                     const distLabel = pickShortDistributorLabel(det?.distributeursList, det?.distributeursRaw);
-                    const forceLastNew = idx === visible.length - 1;
-                    const showNew = it.isNew || forceLastNew;
                     return (
                       <div key={it.id} className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
                         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -805,7 +801,6 @@ export default function RappelConsoRssViewer() {
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
                               {it.pubDate && <Pill>{fmtDateDMY(it.pubDate)}</Pill>}
                               {it.enclosureUrl && <Pill>image</Pill>}
-                              {showNew && <NewPill />}
                               {distLabel && <Pill>{distLabel}</Pill>}
                             </div>
                             <div className="mt-2 text-sm text-neutral-300/90 line-clamp-3">{it.descriptionText}</div>
@@ -867,7 +862,6 @@ export default function RappelConsoRssViewer() {
               {selected.pubDate && <Pill>{fmtDateDMY(selected.pubDate)}</Pill>}
               {selected.pubDateISO && <Pill>{fmtISODateDMY(selected.pubDateISO)}</Pill>}
               {selected.enclosureUrl && <Pill>image</Pill>}
-              {selected.isNew && <NewPill />}
               {detailsMap[selected.id]?.distributeursRaw && (
                 <Pill>
                   Distributeur: {pickShortDistributorLabel(detailsMap[selected.id]?.distributeursList, detailsMap[selected.id]?.distributeursRaw)}
