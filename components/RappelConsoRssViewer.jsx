@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.22";
+const APP_VERSION = "1.0.23";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -334,6 +334,9 @@ export default function RappelConsoRssViewer() {
   const [ficheUrl, setFicheUrl] = useState("");
   const [toast, setToast] = useState(null);
   const [pageSize, setPageSize] = useState(30);
+  const [testEmailToken, setTestEmailToken] = useState("");
+  const [testEmailStatus, setTestEmailStatus] = useState(null);
+  const [testEmailSending, setTestEmailSending] = useState(false);
 
   const distributeurOptions = useMemo(() => {
     const set = new Set();
@@ -544,6 +547,34 @@ export default function RappelConsoRssViewer() {
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
 
+  const sendTestEmail = async () => {
+    if (testEmailSending) return;
+    setTestEmailSending(true);
+    setTestEmailStatus(null);
+    try {
+      const res = await fetch("/api/test-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: testEmailToken || null })
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message = payload?.error || `Request failed (${res.status})`;
+        setTestEmailStatus({ type: "error", message });
+        return;
+      }
+      setTestEmailStatus({
+        type: "success",
+        message: `Test email sent (${payload?.emailMode || "ok"})`
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      setTestEmailStatus({ type: "error", message });
+    } finally {
+      setTestEmailSending(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto max-w-6xl px-4 py-6">
@@ -612,6 +643,40 @@ export default function RappelConsoRssViewer() {
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>
+
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
+              <label className="text-xs text-neutral-400" htmlFor="test-email-token">
+                Test email token
+              </label>
+              <input
+                id="test-email-token"
+                type="password"
+                className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                placeholder="Optional"
+                value={testEmailToken}
+                onChange={(event) => setTestEmailToken(event.target.value)}
+              />
+              <button
+                className={classNames(
+                  "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
+                  testEmailSending && "opacity-60"
+                )}
+                onClick={sendTestEmail}
+                disabled={testEmailSending}
+              >
+                {testEmailSending ? "Sending…" : "Send test email"}
+              </button>
+              {testEmailStatus && (
+                <span
+                  className={classNames(
+                    "text-xs",
+                    testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
+                  )}
+                >
+                  {testEmailStatus.message}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
