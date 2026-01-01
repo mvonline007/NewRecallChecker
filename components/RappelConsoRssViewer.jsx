@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.10";
+const APP_VERSION = "1.0.17";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -549,7 +549,7 @@ export default function RappelConsoRssViewer() {
       <div className="mx-auto max-w-6xl px-4 py-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="space-y-1">
-            <div className="text-xl font-semibold">RappelConso RSS — Categorie 01</div>
+            <div className="text-xl font-semibold">Rappel Conso RSS — Categorie 01</div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
               {lastUpdated && <Pill>Updated: {fmtDateDMY(lastUpdated)}</Pill>}
               {prevRefreshTs && <Pill>Prev refresh: {fmtDateDMY(prevRefreshTs)}</Pill>}

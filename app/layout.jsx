@@ -1,8 +1,10 @@
 import "./globals.css";
 
+export const VERSION = "1.0.17";
+
 export const metadata = {
-  title: "RappelConso RSS Viewer",
-  description: "RappelConso RSS viewer with distributor filtering and embedded fiche view."
+  title: "Rappel Conso RSS Viewer",
+  description: "Rappel Conso RSS viewer with distributor filtering and embedded fiche view."
 };
 
 export default function RootLayout({ children }) {
