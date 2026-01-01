@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.8";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
