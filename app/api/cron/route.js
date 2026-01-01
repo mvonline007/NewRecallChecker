@@ -5,7 +5,7 @@ import { sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.10";
+export const VERSION = "1.0.12";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -115,64 +115,89 @@ function isAuthorized(req) {
 }
 
 export async function GET(req) {
+  const runId = crypto.randomUUID();
+  const startedAt = new Date().toISOString();
+  console.info(`[cron] run started`, { runId, startedAt });
   if (!isAuthorized(req)) {
+    console.warn(`[cron] unauthorized request`, { runId });
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  await ensureSnapshotsTable();
+  try {
+    await ensureSnapshotsTable();
 
-  const latestSnapshot = await getLatestSnapshot();
-  const previousItems = normalizeSnapshotItems(latestSnapshot);
+    const latestSnapshot = await getLatestSnapshot();
+    const previousItems = normalizeSnapshotItems(latestSnapshot);
 
-  const result = await fetchRssItems();
-  if (result.error) {
-    return Response.json({ error: result.error }, { status: 502 });
-  }
+    const result = await fetchRssItems();
+    if (result.error) {
+      console.error(`[cron] rss fetch failed`, { runId, error: result.error });
+      return Response.json({ error: result.error }, { status: 502 });
+    }
 
-  const currentItems = result.items;
-  const previousMap = buildHashMap(previousItems);
-  const currentMap = buildHashMap(currentItems);
+    const currentItems = result.items;
+    const previousMap = buildHashMap(previousItems);
+    const currentMap = buildHashMap(currentItems);
 
-  const newItems = currentItems.filter((item) => !previousMap.has(item.id));
-  const changedItems = currentItems.filter(
-    (item) => previousMap.has(item.id) && previousMap.get(item.id) !== currentMap.get(item.id)
-  );
-  const removedItems = previousItems.filter((item) => !currentMap.has(item.id));
+    const newItems = currentItems.filter((item) => !previousMap.has(item.id));
+    const changedItems = currentItems.filter(
+      (item) => previousMap.has(item.id) && previousMap.get(item.id) !== currentMap.get(item.id)
+    );
+    const removedItems = previousItems.filter((item) => !currentMap.has(item.id));
 
-  await insertSnapshot({ id: crypto.randomUUID(), items: currentItems });
+    await insertSnapshot({ id: crypto.randomUUID(), items: currentItems });
 
-  let emailMessageId = null;
-  let emailMode = "none";
-  const hasDiff = newItems.length || changedItems.length || removedItems.length;
-  if (latestSnapshot && hasDiff) {
-    const content = buildEmailContent({ newItems, changedItems, removedItems });
-    emailMessageId = await sendAlertEmail(content);
-    emailMode = "diff";
-  } else if (currentItems.length) {
-    const testingItems = currentItems.slice(0, 10);
-    const content = buildTestingEmailContent(testingItems);
-    emailMessageId = await sendAlertEmail(content);
-    emailMode = "test";
-  }
+    let emailMessageId = null;
+    let emailMode = "none";
+    const hasDiff = newItems.length || changedItems.length || removedItems.length;
+    if (latestSnapshot && hasDiff) {
+      const content = buildEmailContent({ newItems, changedItems, removedItems });
+      emailMessageId = await sendAlertEmail(content);
+      emailMode = "diff";
+    } else if (currentItems.length) {
+      const testingItems = currentItems.slice(0, 10);
+      const content = buildTestingEmailContent(testingItems);
+      emailMessageId = await sendAlertEmail(content);
+      emailMode = "test";
+    }
 
-  return Response.json(
-    {
-      versions: {
-        cron: VERSION,
-        rss: RSS_VERSION,
-        db: DB_VERSION,
-        email: EMAIL_VERSION
-      },
+    console.info(`[cron] run succeeded`, {
+      runId,
+      emailMode,
       counts: {
         previous: previousItems.length,
         current: currentItems.length,
         new: newItems.length,
         changed: changedItems.length,
         removed: removedItems.length
+      }
+    });
+
+    return Response.json(
+      {
+        versions: {
+          cron: VERSION,
+          rss: RSS_VERSION,
+          db: DB_VERSION,
+          email: EMAIL_VERSION
+        },
+        counts: {
+          previous: previousItems.length,
+          current: currentItems.length,
+          new: newItems.length,
+          changed: changedItems.length,
+          removed: removedItems.length
+        },
+        emailMessageId,
+        emailMode
       },
-      emailMessageId,
-      emailMode
-    },
-    { status: 200 }
-  );
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error(`[cron] run failed`, {
+      runId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return Response.json({ error: "Cron run failed" }, { status: 500 });
+  }
 }
