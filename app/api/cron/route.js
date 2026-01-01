@@ -5,9 +5,10 @@ import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from 
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.27";
+export const VERSION = "1.0.28";
 
 const CRON_SECRET = process.env.CRON_SECRET;
+const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
 
 function normalizeSnapshotItems(snapshot) {
   if (!snapshot?.items) return [];
@@ -86,6 +87,15 @@ function buildEmailErrorDetails(error) {
   };
 }
 
+function normalizeEmailMode(mode) {
+  const normalized = String(mode || "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "diff") return "diff";
+  if (normalized === "latest10") return "latest10";
+  return "auto";
+}
+
 function buildTestingEmailContent(items) {
   const subject = "RappelConso cron test: latest 10 items";
   const formatList = (list) =>
@@ -157,23 +167,27 @@ export async function GET(req) {
     let emailMessageId = null;
     let emailMode = "none";
     const hasDiff = newItems.length || changedItems.length || removedItems.length;
-    if (latestSnapshot && hasDiff) {
-      const content = buildEmailContent({ newItems, changedItems, removedItems });
+    const desiredEmailMode = normalizeEmailMode(CRON_EMAIL_MODE);
+    const shouldSendLatest10 = desiredEmailMode === "latest10" || !latestSnapshot;
+    const shouldSendDiff = desiredEmailMode === "diff" || desiredEmailMode === "auto";
+
+    if (shouldSendLatest10 && currentItems.length) {
+      const testingItems = currentItems.slice(0, 10);
+      const content = buildTestingEmailContent(testingItems);
       try {
         emailMessageId = await sendAlertEmail(content);
-        emailMode = "diff";
+        emailMode = "test";
       } catch (error) {
         return Response.json(
           { error: "Email send failed", details: buildEmailErrorDetails(error) },
           { status: 502 }
         );
       }
-    } else if (currentItems.length) {
-      const testingItems = currentItems.slice(0, 10);
-      const content = buildTestingEmailContent(testingItems);
+    } else if (shouldSendDiff && latestSnapshot && hasDiff) {
+      const content = buildEmailContent({ newItems, changedItems, removedItems });
       try {
         emailMessageId = await sendAlertEmail(content);
-        emailMode = "test";
+        emailMode = "diff";
       } catch (error) {
         return Response.json(
           { error: "Email send failed", details: buildEmailErrorDetails(error) },
