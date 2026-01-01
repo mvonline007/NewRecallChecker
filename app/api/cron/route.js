@@ -5,7 +5,7 @@ import { sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.18";
+export const VERSION = "1.0.19";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
