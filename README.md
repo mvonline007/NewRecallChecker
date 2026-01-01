@@ -1,4 +1,4 @@
-# RappelConso RSS Viewer (Vercel / Node.js)
+# Rappel Conso RSS Viewer (Vercel / Node.js)
 
 ## Run locally
 ```bash

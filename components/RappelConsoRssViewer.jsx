@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.10";
+const APP_VERSION = "1.0.28";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -68,6 +68,20 @@ function stripHtml(html) {
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
+}
+
+function formatEmailConfig(config) {
+  if (!config) return "";
+  const recipients = Array.isArray(config.recipients) ? config.recipients.join(", ") : "";
+  return [
+    config.user ? `user=${config.user}` : "user=missing",
+    `recipients=${recipients || "missing"}`,
+    `appPasswordConfigured=${config.appPasswordConfigured ? "yes" : "no"}`,
+    `appPasswordLength=${config.appPasswordLength ?? 0}`,
+    config.service ? `service=${config.service}` : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function openExternal(url) {
@@ -334,6 +348,9 @@ export default function RappelConsoRssViewer() {
   const [ficheUrl, setFicheUrl] = useState("");
   const [toast, setToast] = useState(null);
   const [pageSize, setPageSize] = useState(30);
+  const [cronSecret, setCronSecret] = useState("");
+  const [testEmailStatus, setTestEmailStatus] = useState(null);
+  const [testEmailSending, setTestEmailSending] = useState(false);
 
   const distributeurOptions = useMemo(() => {
     const set = new Set();
@@ -544,12 +561,49 @@ export default function RappelConsoRssViewer() {
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
 
+  const sendTestEmail = async () => {
+    if (testEmailSending) return;
+    setTestEmailSending(true);
+    setTestEmailStatus(null);
+    try {
+      const headers = {};
+      if (cronSecret.trim()) {
+        headers.Authorization = `Bearer ${cronSecret.trim()}`;
+      }
+      const res = await fetch("/api/test-email", {
+        method: "POST",
+        headers
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message = payload?.error || `Request failed (${res.status})`;
+        const details = formatEmailConfig(payload?.details?.emailConfig);
+        setTestEmailStatus({
+          type: "error",
+          message,
+          details
+        });
+        return;
+      }
+      setTestEmailStatus({
+        type: "success",
+        message: `Test email sent (${payload?.emailMode || "ok"})`,
+        details: ""
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      setTestEmailStatus({ type: "error", message });
+    } finally {
+      setTestEmailSending(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto max-w-6xl px-4 py-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="space-y-1">
-            <div className="text-xl font-semibold">RappelConso RSS — Categorie 01</div>
+            <div className="text-xl font-semibold">Rappel Conso RSS — Categorie 01</div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
               {lastUpdated && <Pill>Updated: {fmtDateDMY(lastUpdated)}</Pill>}
               {prevRefreshTs && <Pill>Prev refresh: {fmtDateDMY(prevRefreshTs)}</Pill>}
@@ -612,6 +666,44 @@ export default function RappelConsoRssViewer() {
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>
+
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
+              <label className="text-xs text-neutral-400" htmlFor="cron-secret">
+                Cron secret
+              </label>
+              <input
+                id="cron-secret"
+                type="password"
+                className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                placeholder="Optional"
+                value={cronSecret}
+                onChange={(event) => setCronSecret(event.target.value)}
+              />
+              <button
+                className={classNames(
+                  "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
+                  testEmailSending && "opacity-60"
+                )}
+                onClick={sendTestEmail}
+                disabled={testEmailSending}
+              >
+                {testEmailSending ? "Sending…" : "Send test email"}
+              </button>
+              {testEmailStatus && (
+                <span className="flex flex-col text-xs">
+                  <span
+                    className={classNames(
+                      testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
+                    )}
+                  >
+                    {testEmailStatus.message}
+                  </span>
+                  {testEmailStatus.details && (
+                    <span className="text-neutral-400">{testEmailStatus.details}</span>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
