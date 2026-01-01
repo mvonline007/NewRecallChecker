@@ -5,7 +5,7 @@ import { sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.8";
+export const VERSION = "1.0.9";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -79,6 +79,35 @@ function buildEmailContent({ newItems, changedItems, removedItems }) {
   return { subject, text, html };
 }
 
+function buildTestingEmailContent(items) {
+  const subject = "RappelConso cron test: latest 10 items";
+  const formatList = (list) =>
+    list.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
+
+  const text = [
+    "Cron test email: latest 10 items from the RSS feed.",
+    "",
+    formatList(items) || "- none"
+  ].join("\n");
+
+  const htmlList = (list) =>
+    list.length
+      ? `<ul>${list
+          .map(
+            (item) =>
+              `<li><a href="${item.link || "#"}">${item.title || item.id}</a></li>`
+          )
+          .join("")}</ul>`
+      : "<p>- none</p>";
+
+  const html = `
+    <p>Cron test email: latest 10 items from the RSS feed.</p>
+    ${htmlList(items)}
+  `;
+
+  return { subject, text, html };
+}
+
 function isAuthorized(req) {
   if (!CRON_SECRET) return true;
   const authHeader = req.headers.get("authorization") || "";
@@ -113,9 +142,17 @@ export async function GET(req) {
   await insertSnapshot({ id: crypto.randomUUID(), items: currentItems });
 
   let emailMessageId = null;
-  if (latestSnapshot && (newItems.length || changedItems.length || removedItems.length)) {
+  let emailMode = "none";
+  const hasDiff = newItems.length || changedItems.length || removedItems.length;
+  if (latestSnapshot && hasDiff) {
     const content = buildEmailContent({ newItems, changedItems, removedItems });
     emailMessageId = await sendAlertEmail(content);
+    emailMode = "diff";
+  } else if (currentItems.length) {
+    const testingItems = currentItems.slice(0, 10);
+    const content = buildTestingEmailContent(testingItems);
+    emailMessageId = await sendAlertEmail(content);
+    emailMode = "test";
   }
 
   return Response.json(
@@ -133,7 +170,8 @@ export async function GET(req) {
         changed: changedItems.length,
         removed: removedItems.length
       },
-      emailMessageId
+      emailMessageId,
+      emailMode
     },
     { status: 200 }
   );
