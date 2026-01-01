@@ -1,8 +1,8 @@
-import { sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.24";
+export const VERSION = "1.0.25";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -58,7 +58,20 @@ export async function POST(req) {
     }
 
     const content = buildTestingEmailContent(items);
-    const emailMessageId = await sendAlertEmail(content);
+    let emailMessageId;
+    try {
+      emailMessageId = await sendAlertEmail(content);
+    } catch (error) {
+      return Response.json(
+        {
+          error: error instanceof Error ? error.message : "Email send failed",
+          details: {
+            emailConfig: getEmailConfigSummary()
+          }
+        },
+        { status: 502 }
+      );
+    }
 
     return Response.json(
       {

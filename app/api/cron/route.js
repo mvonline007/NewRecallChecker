@@ -1,11 +1,11 @@
 import crypto from "crypto";
 
 import { ensureSnapshotsTable, getLatestSnapshot, insertSnapshot, VERSION as DB_VERSION } from "@/lib/db";
-import { sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.24";
+export const VERSION = "1.0.25";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -77,6 +77,13 @@ function buildEmailContent({ newItems, changedItems, removedItems }) {
   `;
 
   return { subject, text, html };
+}
+
+function buildEmailErrorDetails(error) {
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    emailConfig: getEmailConfigSummary()
+  };
 }
 
 function buildTestingEmailContent(items) {
@@ -152,13 +159,27 @@ export async function GET(req) {
     const hasDiff = newItems.length || changedItems.length || removedItems.length;
     if (latestSnapshot && hasDiff) {
       const content = buildEmailContent({ newItems, changedItems, removedItems });
-      emailMessageId = await sendAlertEmail(content);
-      emailMode = "diff";
+      try {
+        emailMessageId = await sendAlertEmail(content);
+        emailMode = "diff";
+      } catch (error) {
+        return Response.json(
+          { error: "Email send failed", details: buildEmailErrorDetails(error) },
+          { status: 502 }
+        );
+      }
     } else if (currentItems.length) {
       const testingItems = currentItems.slice(0, 10);
       const content = buildTestingEmailContent(testingItems);
-      emailMessageId = await sendAlertEmail(content);
-      emailMode = "test";
+      try {
+        emailMessageId = await sendAlertEmail(content);
+        emailMode = "test";
+      } catch (error) {
+        return Response.json(
+          { error: "Email send failed", details: buildEmailErrorDetails(error) },
+          { status: 502 }
+        );
+      }
     }
 
     console.info(`[cron] run succeeded`, {

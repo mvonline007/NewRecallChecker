@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.24";
+const APP_VERSION = "1.0.25";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -68,6 +68,20 @@ function stripHtml(html) {
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
+}
+
+function formatEmailConfig(config) {
+  if (!config) return "";
+  const recipients = Array.isArray(config.recipients) ? config.recipients.join(", ") : "";
+  return [
+    config.user ? `user=${config.user}` : "user=missing",
+    `recipients=${recipients || "missing"}`,
+    `appPasswordConfigured=${config.appPasswordConfigured ? "yes" : "no"}`,
+    `appPasswordLength=${config.appPasswordLength ?? 0}`,
+    config.service ? `service=${config.service}` : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function openExternal(url) {
@@ -563,12 +577,18 @@ export default function RappelConsoRssViewer() {
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
         const message = payload?.error || `Request failed (${res.status})`;
-        setTestEmailStatus({ type: "error", message });
+        const details = formatEmailConfig(payload?.details?.emailConfig);
+        setTestEmailStatus({
+          type: "error",
+          message,
+          details
+        });
         return;
       }
       setTestEmailStatus({
         type: "success",
-        message: `Test email sent (${payload?.emailMode || "ok"})`
+        message: `Test email sent (${payload?.emailMode || "ok"})`,
+        details: ""
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unexpected error";
@@ -670,13 +690,17 @@ export default function RappelConsoRssViewer() {
                 {testEmailSending ? "Sending…" : "Send test email"}
               </button>
               {testEmailStatus && (
-                <span
-                  className={classNames(
-                    "text-xs",
-                    testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
+                <span className="flex flex-col text-xs">
+                  <span
+                    className={classNames(
+                      testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
+                    )}
+                  >
+                    {testEmailStatus.message}
+                  </span>
+                  {testEmailStatus.details && (
+                    <span className="text-neutral-400">{testEmailStatus.details}</span>
                   )}
-                >
-                  {testEmailStatus.message}
                 </span>
               )}
             </div>
