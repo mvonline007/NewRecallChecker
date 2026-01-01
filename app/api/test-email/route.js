@@ -2,15 +2,14 @@ import { sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.23";
+export const VERSION = "1.0.24";
 
-const TEST_EMAIL_TOKEN = process.env.TEST_EMAIL_TOKEN;
+const CRON_SECRET = process.env.CRON_SECRET;
 
-function isAuthorized(token) {
-  if (!TEST_EMAIL_TOKEN) {
-    return process.env.NODE_ENV !== "production";
-  }
-  return token === TEST_EMAIL_TOKEN;
+function isAuthorized(req) {
+  if (!CRON_SECRET) return true;
+  const authHeader = req.headers.get("authorization") || "";
+  return authHeader === `Bearer ${CRON_SECRET}`;
 }
 
 function buildTestingEmailContent(items) {
@@ -44,9 +43,7 @@ function buildTestingEmailContent(items) {
 
 export async function POST(req) {
   try {
-    const payload = await req.json().catch(() => ({}));
-    const token = payload?.token || "";
-    if (!isAuthorized(token)) {
+    if (!isAuthorized(req)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.23";
+const APP_VERSION = "1.0.24";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -334,7 +334,7 @@ export default function RappelConsoRssViewer() {
   const [ficheUrl, setFicheUrl] = useState("");
   const [toast, setToast] = useState(null);
   const [pageSize, setPageSize] = useState(30);
-  const [testEmailToken, setTestEmailToken] = useState("");
+  const [cronSecret, setCronSecret] = useState("");
   const [testEmailStatus, setTestEmailStatus] = useState(null);
   const [testEmailSending, setTestEmailSending] = useState(false);
 
@@ -552,10 +552,13 @@ export default function RappelConsoRssViewer() {
     setTestEmailSending(true);
     setTestEmailStatus(null);
     try {
+      const headers = {};
+      if (cronSecret.trim()) {
+        headers.Authorization = `Bearer ${cronSecret.trim()}`;
+      }
       const res = await fetch("/api/test-email", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: testEmailToken || null })
+        headers
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -645,16 +648,16 @@ export default function RappelConsoRssViewer() {
             </button>
 
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
-              <label className="text-xs text-neutral-400" htmlFor="test-email-token">
-                Test email token
+              <label className="text-xs text-neutral-400" htmlFor="cron-secret">
+                Cron secret
               </label>
               <input
-                id="test-email-token"
+                id="cron-secret"
                 type="password"
                 className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
                 placeholder="Optional"
-                value={testEmailToken}
-                onChange={(event) => setTestEmailToken(event.target.value)}
+                value={cronSecret}
+                onChange={(event) => setCronSecret(event.target.value)}
               />
               <button
                 className={classNames(
