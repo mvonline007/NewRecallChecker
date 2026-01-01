@@ -3,7 +3,8 @@
   "crons": [
     {
       "path": "/api/cron",
-      "schedule": "45 17 * * *"
+      "schedule": "0 8 * * *",
+      "timezone": "Europe/Paris"
     }
   ]
 }
