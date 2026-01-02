@@ -1,53 +1,26 @@
-import * as cheerio from "cheerio";
+import { fetchDistributeurInfo, VERSION as DISTRIBUTEUR_VERSION } from "@/lib/distributeurs";
 
 export const runtime = "nodejs";
-
-function normalizeSplitList(raw) {
-  if (!raw) return [];
-  return String(raw)
-    .split(/[;\n\r,]+/g)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function isAllowedUrl(u) {
-  try {
-    const x = new URL(u);
-    return x.protocol === "https:" && x.hostname === "rappel.conso.gouv.fr";
-  } catch {
-    return false;
-  }
-}
+export const VERSION = "1.0.32";
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const url = searchParams.get("url") || "";
 
-  if (!isAllowedUrl(url)) {
-    return Response.json({ error: "Invalid or disallowed url" }, { status: 400 });
+  try {
+    const { distributeursRaw, distributeursList, motifRaw } = await fetchDistributeurInfo(url);
+    return Response.json(
+      {
+        distributeursRaw,
+        distributeursList,
+        motifRaw,
+        versions: { api: VERSION, distributeur: DISTRIBUTEUR_VERSION }
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid or disallowed url";
+    const status = message.startsWith("Invalid or disallowed url") ? 400 : 502;
+    return Response.json({ error: message }, { status });
   }
-
-  const res = await fetch(url, {
-    headers: { Accept: "text/html, */*" },
-    cache: "no-store"
-  });
-
-  if (!res.ok) {
-    return Response.json({ error: `detail HTTP ${res.status}` }, { status: 502 });
-  }
-
-  const html = await res.text();
-  const $ = cheerio.load(html);
-
-  let distributeursRaw = "";
-  $("dt").each((_, el) => {
-    const t = $(el).text().replace(/\s+/g, " ").trim();
-    if (t === "Distributeurs") {
-      distributeursRaw = $(el).next("dd").text().replace(/\s+/g, " ").trim();
-    }
-  });
-
-  const distributeursList = normalizeSplitList(distributeursRaw);
-
-  return Response.json({ distributeursRaw, distributeursList }, { status: 200 });
 }

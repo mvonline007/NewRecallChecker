@@ -2,10 +2,12 @@ import crypto from "crypto";
 
 import { ensureSnapshotsTable, getLatestSnapshot, insertSnapshot, VERSION as DB_VERSION } from "@/lib/db";
 import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import { fetchDistributeurInfo } from "@/lib/distributeurs";
+import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.28";
+export const VERSION = "1.0.32";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -58,24 +60,16 @@ function buildEmailContent({ newItems, changedItems, removedItems }) {
     formatList(removedItems) || "- none"
   ].join("\n");
 
-  const htmlList = (items) =>
-    items.length
-      ? `<ul>${items
-          .map(
-            (item) =>
-              `<li><a href="${item.link || "#"}">${item.title || item.id}</a></li>`
-          )
-          .join("")}</ul>`
-      : "<p>- none</p>";
-
-  const html = `
-    <p>New items (${newItems.length}):</p>
-    ${htmlList(newItems)}
-    <p>Changed items (${changedItems.length}):</p>
-    ${htmlList(changedItems)}
-    <p>Removed items (${removedItems.length}):</p>
-    ${htmlList(removedItems)}
-  `;
+  const html = buildEmailHtml({
+    title: "RappelConso updates",
+    intro: "Latest changes detected in the RappelConso RSS feed.",
+    sections: [
+      { title: "New items", items: newItems },
+      { title: "Changed items", items: changedItems },
+      { title: "Removed items", items: removedItems }
+    ],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
 
   return { subject, text, html };
 }
@@ -107,22 +101,30 @@ function buildTestingEmailContent(items) {
     formatList(items) || "- none"
   ].join("\n");
 
-  const htmlList = (list) =>
-    list.length
-      ? `<ul>${list
-          .map(
-            (item) =>
-              `<li><a href="${item.link || "#"}">${item.title || item.id}</a></li>`
-          )
-          .join("")}</ul>`
-      : "<p>- none</p>";
-
-  const html = `
-    <p>Cron test email: latest 10 items from the RSS feed.</p>
-    ${htmlList(items)}
-  `;
+  const html = buildEmailHtml({
+    title: "RappelConso latest items",
+    intro: "Cron test email: latest 10 items from the RSS feed.",
+    sections: [{ title: "Latest 10 items", items }],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
 
   return { subject, text, html };
+}
+
+async function enrichItemsWithDistributeurs(items) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const results = await Promise.all(
+    items.map(async (item) => {
+      if (!item?.link) return item;
+      try {
+        const info = await fetchDistributeurInfo(item.link);
+        return { ...item, ...info };
+      } catch {
+        return item;
+      }
+    })
+  );
+  return results;
 }
 
 function isAuthorized(req) {
@@ -173,7 +175,8 @@ export async function GET(req) {
 
     if (shouldSendLatest10 && currentItems.length) {
       const testingItems = currentItems.slice(0, 10);
-      const content = buildTestingEmailContent(testingItems);
+      const enrichedTestingItems = await enrichItemsWithDistributeurs(testingItems);
+      const content = buildTestingEmailContent(enrichedTestingItems);
       try {
         emailMessageId = await sendAlertEmail(content);
         emailMode = "test";
@@ -184,7 +187,16 @@ export async function GET(req) {
         );
       }
     } else if (shouldSendDiff && latestSnapshot && hasDiff) {
-      const content = buildEmailContent({ newItems, changedItems, removedItems });
+      const [enrichedNew, enrichedChanged, enrichedRemoved] = await Promise.all([
+        enrichItemsWithDistributeurs(newItems),
+        enrichItemsWithDistributeurs(changedItems),
+        enrichItemsWithDistributeurs(removedItems)
+      ]);
+      const content = buildEmailContent({
+        newItems: enrichedNew,
+        changedItems: enrichedChanged,
+        removedItems: enrichedRemoved
+      });
       try {
         emailMessageId = await sendAlertEmail(content);
         emailMode = "diff";

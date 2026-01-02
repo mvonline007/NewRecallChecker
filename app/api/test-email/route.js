@@ -1,8 +1,10 @@
 import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import { fetchDistributeurInfo } from "@/lib/distributeurs";
+import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.28";
+export const VERSION = "1.0.32";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -23,22 +25,30 @@ function buildTestingEmailContent(items) {
     formatList(items) || "- none"
   ].join("\n");
 
-  const htmlList = (list) =>
-    list.length
-      ? `<ul>${list
-          .map(
-            (item) =>
-              `<li><a href="${item.link || "#"}">${item.title || item.id}</a></li>`
-          )
-          .join("")}</ul>`
-      : "<p>- none</p>";
-
-  const html = `
-    <p>Manual test email: latest 10 items from the RSS feed.</p>
-    ${htmlList(items)}
-  `;
+  const html = buildEmailHtml({
+    title: "RappelConso latest items",
+    intro: "Manual test email: latest 10 items from the RSS feed.",
+    sections: [{ title: "Latest 10 items", items }],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
 
   return { subject, text, html };
+}
+
+async function enrichItemsWithDistributeurs(items) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const results = await Promise.all(
+    items.map(async (item) => {
+      if (!item?.link) return item;
+      try {
+        const info = await fetchDistributeurInfo(item.link);
+        return { ...item, ...info };
+      } catch {
+        return item;
+      }
+    })
+  );
+  return results;
 }
 
 export async function POST(req) {
@@ -57,7 +67,8 @@ export async function POST(req) {
       return Response.json({ error: "No RSS items available" }, { status: 404 });
     }
 
-    const content = buildTestingEmailContent(items);
+    const enrichedItems = await enrichItemsWithDistributeurs(items);
+    const content = buildTestingEmailContent(enrichedItems);
     let emailMessageId;
     try {
       emailMessageId = await sendAlertEmail(content);

@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.28";
+const APP_VERSION = "1.0.32";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -351,6 +351,8 @@ export default function RappelConsoRssViewer() {
   const [cronSecret, setCronSecret] = useState("");
   const [testEmailStatus, setTestEmailStatus] = useState(null);
   const [testEmailSending, setTestEmailSending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewKey, setPreviewKey] = useState(0);
 
   const distributeurOptions = useMemo(() => {
     const set = new Set();
@@ -560,6 +562,13 @@ export default function RappelConsoRssViewer() {
   }, [selected]);
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
+  const previewUrl = useMemo(() => {
+    const secret = cronSecret.trim();
+    const params = new URLSearchParams();
+    if (secret) params.set("secret", secret);
+    const query = params.toString();
+    return query ? `/api/email-preview?${query}` : "/api/email-preview";
+  }, [cronSecret]);
 
   const sendTestEmail = async () => {
     if (testEmailSending) return;
@@ -688,6 +697,16 @@ export default function RappelConsoRssViewer() {
                 disabled={testEmailSending}
               >
                 {testEmailSending ? "Sending…" : "Send test email"}
+              </button>
+              <button
+                className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                onClick={() => {
+                  setPreviewKey((val) => val + 1);
+                  setPreviewOpen(true);
+                }}
+                type="button"
+              >
+                Preview email
               </button>
               {testEmailStatus && (
                 <span className="flex flex-col text-xs">
@@ -984,6 +1003,9 @@ export default function RappelConsoRssViewer() {
                   <div>
                     <span className="text-neutral-400">Distributeurs:</span> {detailsMap[selected.id].distributeursRaw || "(not found)"}
                   </div>
+                  <div>
+                    <span className="text-neutral-400">Motif du rappel:</span> {detailsMap[selected.id].motifRaw || "(not found)"}
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1069,6 +1091,29 @@ export default function RappelConsoRssViewer() {
             ) : (
               <div className="p-6 text-sm text-neutral-400">No fiche URL</div>
             )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Email preview">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+            <span>Preview is rendered from the email template.</span>
+            <button
+              type="button"
+              className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+              onClick={() => setPreviewKey((val) => val + 1)}
+            >
+              Reload preview
+            </button>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-neutral-800">
+            <iframe
+              key={previewKey}
+              title="email-preview"
+              src={previewUrl}
+              className="h-[75vh] w-full bg-white"
+            />
           </div>
         </div>
       </Modal>
