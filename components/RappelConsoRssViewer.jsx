@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.38";
+const APP_VERSION = "1.0.39";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -121,6 +121,13 @@ function toArray(v) {
   if (v === undefined || v === null) return [];
   if (Array.isArray(v)) return v;
   if (typeof v === "string") {
+    const trimmed = v.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
     const parts = v
       .split(/\s*[,;\n\r]+\s*/g)
       .map((s) => s.trim())
@@ -301,6 +308,22 @@ function ImageWithFallback({ src, alt }) {
   );
 }
 
+function normalizeImageUrl(entry) {
+  if (!entry) return null;
+  if (typeof entry === "string") return entry;
+  if (typeof entry === "object") {
+    return entry.url || entry.href || entry.link || entry.src || entry.image_url || null;
+  }
+  return null;
+}
+
+function extractImageUrls(record) {
+  const raw = getFirst(record, ["liens_vers_les_images", "liens_images", "images", "enclosure_url"]);
+  const entries = toArray(raw);
+  const urls = entries.map((entry) => normalizeImageUrl(entry)).filter(Boolean);
+  return urls;
+}
+
 function GtinSearchPanel({ onOpenFiche }) {
   const [mode, setMode] = useState("auto");
   const [gtinRaw, setGtinRaw] = useState("");
@@ -439,9 +462,7 @@ function GtinSearchPanel({ onOpenFiche }) {
     const refs = toArray(
       getFirst(r, ["modeles_ou_references", "modeles_ou_reference", "references", "modele_reference"])
     );
-    const images = toArray(
-      getFirst(r, ["liens_vers_les_images", "liens_images", "images", "enclosure_url"])
-    );
+    const images = extractImageUrls(r);
 
     const descriptionParts = [
       gtin ? `GTIN: ${gtin}` : null,
@@ -474,6 +495,9 @@ function GtinSearchPanel({ onOpenFiche }) {
         role="button"
         tabIndex={0}
         className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
+        onClick={() => {
+          if (card.link) onOpenFiche?.(card.link);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
