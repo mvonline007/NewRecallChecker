@@ -1,0 +1,202 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+export const VERSION = "1.0.33";
+
+const emptyStatus = { type: "", message: "" };
+
+function formatRecipients(list) {
+  if (!Array.isArray(list) || list.length === 0) return "None";
+  return list.join(", ");
+}
+
+function formatDate(value) {
+  if (!value) return "Unknown";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return String(value);
+  return dt.toLocaleString();
+}
+
+export default function ConfigPage() {
+  const [alertEmailTo, setAlertEmailTo] = useState("");
+  const [cronSecret, setCronSecret] = useState("");
+  const [status, setStatus] = useState(emptyStatus);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [config, setConfig] = useState(null);
+  const [summary, setSummary] = useState(null);
+
+  const loadConfig = async () => {
+    setLoading(true);
+    setStatus(emptyStatus);
+    try {
+      const headers = {};
+      if (cronSecret.trim()) {
+        headers.Authorization = `Bearer ${cronSecret.trim()}`;
+      }
+      const res = await fetch("/api/email-config", { headers, cache: "no-store" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus({
+          type: "error",
+          message: payload?.error || `Unable to load config (${res.status}).`
+        });
+        return;
+      }
+      setConfig(payload?.config || null);
+      setSummary(payload?.summary || null);
+      setAlertEmailTo(payload?.config?.alertEmailTo || "");
+      setStatus({ type: "success", message: "Configuration loaded." });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      setStatus({ type: "error", message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveConfig = async () => {
+    setSaving(true);
+    setStatus(emptyStatus);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (cronSecret.trim()) {
+        headers.Authorization = `Bearer ${cronSecret.trim()}`;
+      }
+      const res = await fetch("/api/email-config", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ alertEmailTo })
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus({
+          type: "error",
+          message: payload?.error || `Save failed (${res.status}).`
+        });
+        return;
+      }
+      setConfig(payload?.config || null);
+      setSummary(payload?.summary || null);
+      setAlertEmailTo(payload?.config?.alertEmailTo || alertEmailTo);
+      setStatus({ type: "success", message: "Configuration saved." });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      setStatus({ type: "error", message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    loadConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
+        <div className="space-y-2">
+          <div className="text-2xl font-semibold">Email configuration</div>
+          <p className="text-sm text-neutral-400">
+            Configure which email address(es) receive cron alerts. Separate multiple recipients with
+            commas. The cron job will use this configuration before falling back to the
+            ALERT_EMAIL_TO environment variable.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
+          <div className="flex flex-col gap-4">
+            <label className="text-sm text-neutral-200">
+              Alert recipients
+              <input
+                value={alertEmailTo}
+                onChange={(event) => setAlertEmailTo(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                placeholder="alerts@example.com, ops@example.com"
+              />
+            </label>
+
+            <label className="text-sm text-neutral-200">
+              Cron secret (optional)
+              <input
+                value={cronSecret}
+                onChange={(event) => setCronSecret(event.target.value)}
+                type="password"
+                className="mt-2 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                placeholder="Bearer token used to secure /api/email-config"
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+                onClick={loadConfig}
+                disabled={loading}
+              >
+                {loading ? "Loading…" : "Reload"}
+              </button>
+              <button
+                className="rounded-xl border border-neutral-200 bg-neutral-100 px-4 py-2 text-sm text-neutral-950 hover:bg-neutral-200"
+                onClick={saveConfig}
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save configuration"}
+              </button>
+              <a
+                href="/"
+                className="rounded-xl border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+              >
+                Back to dashboard
+              </a>
+            </div>
+
+            {status.message && (
+              <div
+                className={
+                  status.type === "error"
+                    ? "rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200"
+                    : "rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-200"
+                }
+              >
+                {status.message}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 text-sm text-neutral-200">
+          <div className="text-sm font-semibold text-neutral-100">Current configuration</div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <div>
+              <div className="text-xs uppercase text-neutral-500">Stored recipients</div>
+              <div>{config?.alertEmailTo || "Not set"}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-neutral-500">Last updated</div>
+              <div>{formatDate(config?.updatedAt)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-neutral-500">Effective recipients</div>
+              <div>{formatRecipients(summary?.recipients)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-neutral-500">Source</div>
+              <div>{summary?.configSource || "Unknown"}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-neutral-500">SMTP user</div>
+              <div>{summary?.user || "Not configured"}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-neutral-500">App password configured</div>
+              <div>{summary?.appPasswordConfigured ? "Yes" : "No"}</div>
+            </div>
+          </div>
+          <div className="mt-4 text-xs text-neutral-500">Version {VERSION}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
