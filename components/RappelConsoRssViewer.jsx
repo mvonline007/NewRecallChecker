@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.46";
+const APP_VERSION = "1.0.47";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -547,10 +547,8 @@ function GtinSearchPanel({ onOpenFiche }) {
       try {
         const reader = new BrowserMultiFormatReader();
         zxingReaderRef.current = reader;
-        const devices = await reader.listVideoInputDevices();
-        const preferred = devices.find((d) => /back|rear|environment/i.test(d.label));
-        const deviceId = (preferred || devices[0])?.deviceId ?? null;
-        reader.decodeFromVideoDevice(deviceId, videoRef.current, (result, err) => {
+        const constraints = { video: { facingMode: { ideal: "environment" } } };
+        reader.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
           if (!active) return;
           if (result?.getText) {
             const cleaned = String(result.getText()).replace(/[^0-9]/g, "");
@@ -862,7 +860,7 @@ function GtinSearchPanel({ onOpenFiche }) {
             Astuce: privilégiez un bon éclairage pour une détection plus rapide.
           </div>
           <div className="text-xs text-neutral-500">
-            iPhone: utilisez Safari/Chrome avec autorisation caméra (HTTPS requis).
+            iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
           </div>
         </div>
       </Modal>
