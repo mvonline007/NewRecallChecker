@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-export const VERSION = "1.0.35";
+export const VERSION = "1.0.36";
 
 const emptyStatus = { type: "", message: "" };
+const CRON_SCHEDULE = "0 6 * * *";
 
 function formatRecipients(list) {
   if (!Array.isArray(list) || list.length === 0) return "None";
@@ -25,9 +26,16 @@ function formatDate(value) {
   return dt.toLocaleString();
 }
 
+function filterDistributeurOptions(options, query) {
+  if (!query) return options;
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return options;
+  return options.filter((option) => option.toLowerCase().includes(normalized));
+}
+
 export default function ConfigPage() {
   const [recipientConfigs, setRecipientConfigs] = useState([
-    { email: "", distributeurs: [] }
+    { email: "", distributeurs: [], filter: "" }
   ]);
   const [distributeurOptions, setDistributeurOptions] = useState([]);
   const [cronSecret, setCronSecret] = useState("");
@@ -72,11 +80,14 @@ export default function ConfigPage() {
       const loadedRecipients = Array.isArray(payload?.config?.recipients)
         ? payload.config.recipients.map((entry) => ({
             email: entry.email || "",
-            distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : []
+            distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : [],
+            filter: ""
           }))
         : [];
       setRecipientConfigs(
-        loadedRecipients.length ? loadedRecipients : [{ email: "", distributeurs: [] }]
+        loadedRecipients.length
+          ? loadedRecipients
+          : [{ email: "", distributeurs: [], filter: "" }]
       );
       setStatus({ type: "success", message: "Configuration loaded." });
     } catch (error) {
@@ -119,7 +130,8 @@ export default function ConfigPage() {
       const savedRecipients = Array.isArray(payload?.config?.recipients)
         ? payload.config.recipients.map((entry) => ({
             email: entry.email || "",
-            distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : []
+            distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : [],
+            filter: ""
           }))
         : [];
       setRecipientConfigs(savedRecipients.length ? savedRecipients : recipientConfigs);
@@ -153,70 +165,93 @@ export default function ConfigPage() {
           <div className="flex flex-col gap-4">
             <div className="space-y-3">
               <div className="text-sm text-neutral-200">Alert recipients</div>
-              {recipientConfigs.map((entry, index) => (
-                <div
-                  key={`${entry.email}-${index}`}
-                  className="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-950 p-3"
-                >
-                  <label className="text-xs text-neutral-400">Recipient email</label>
-                  <input
-                    value={entry.email}
-                    onChange={(event) => {
-                      const next = [...recipientConfigs];
-                      next[index] = { ...next[index], email: event.target.value };
-                      setRecipientConfigs(next);
-                    }}
-                    className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
-                    placeholder="alerts@example.com"
-                  />
-                  <label className="text-xs text-neutral-400">Distributeurs filter (optional)</label>
-                  <select
-                    multiple
-                    value={entry.distributeurs}
-                    onChange={(event) => {
-                      const selected = Array.from(event.target.selectedOptions).map(
-                        (option) => option.value
-                      );
-                      const next = [...recipientConfigs];
-                      next[index] = { ...next[index], distributeurs: selected };
-                      setRecipientConfigs(next);
-                    }}
-                    className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+              {recipientConfigs.map((entry, index) => {
+                const filteredOptions = filterDistributeurOptions(
+                  distributeurOptions,
+                  entry.filter
+                );
+                return (
+                  <div
+                    key={`${entry.email}-${index}`}
+                    className="flex flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-950 p-3"
                   >
-                    {distributeurOptions.length === 0 ? (
-                      <option disabled value="">
-                        No distributeurs available
-                      </option>
-                    ) : (
-                      distributeurOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                  <div className="text-xs text-neutral-500">
-                    Select one or more distributeurs (leave empty for all).
-                  </div>
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      className="rounded-xl border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                      onClick={() => {
-                        const next = recipientConfigs.filter((_, i) => i !== index);
-                        setRecipientConfigs(next.length ? next : [{ email: "", distributeurs: "" }]);
+                    <label className="text-xs text-neutral-400">Recipient email</label>
+                    <input
+                      value={entry.email}
+                      onChange={(event) => {
+                        const next = [...recipientConfigs];
+                        next[index] = { ...next[index], email: event.target.value };
+                        setRecipientConfigs(next);
                       }}
+                      className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                      placeholder="alerts@example.com"
+                    />
+                    <label className="text-xs text-neutral-400">Distributeurs filter (optional)</label>
+                    <input
+                      value={entry.filter || ""}
+                      onChange={(event) => {
+                        const next = [...recipientConfigs];
+                        next[index] = { ...next[index], filter: event.target.value };
+                        setRecipientConfigs(next);
+                      }}
+                      className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                      placeholder="Search distributeurs…"
+                    />
+                    <select
+                      multiple
+                      value={entry.distributeurs}
+                      onChange={(event) => {
+                        const selected = Array.from(event.target.selectedOptions).map(
+                          (option) => option.value
+                        );
+                        const next = [...recipientConfigs];
+                        next[index] = { ...next[index], distributeurs: selected };
+                        setRecipientConfigs(next);
+                      }}
+                      className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
                     >
-                      Remove
-                    </button>
+                      {filteredOptions.length === 0 ? (
+                        <option disabled value="">
+                          {distributeurOptions.length === 0
+                            ? "No distributeurs available"
+                            : "No distributeurs match your search"}
+                        </option>
+                      ) : (
+                        filteredOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <div className="text-xs text-neutral-500">
+                      Select one or more distributeurs (leave empty for all).
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                        onClick={() => {
+                          const next = recipientConfigs.filter((_, i) => i !== index);
+                          setRecipientConfigs(
+                            next.length ? next : [{ email: "", distributeurs: [], filter: "" }]
+                          );
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               <button
                 type="button"
                 className="rounded-xl border border-neutral-700 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
                 onClick={() =>
-                  setRecipientConfigs([...recipientConfigs, { email: "", distributeurs: [] }])
+                  setRecipientConfigs([
+                    ...recipientConfigs,
+                    { email: "", distributeurs: [], filter: "" }
+                  ])
                 }
               >
                 Add recipient
@@ -233,6 +268,14 @@ export default function ConfigPage() {
                 placeholder="Bearer token used to secure /api/email-config"
               />
             </label>
+            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-400">
+              <div className="text-neutral-200">Cron schedule</div>
+              <div className="mt-1">
+                Current schedule: <span className="text-neutral-100">{CRON_SCHEDULE}</span> (UTC).
+                Update the Vercel cron schedule in <code className="text-neutral-200">vercel.json</code>{" "}
+                and redeploy to change the run time.
+              </div>
+            </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <button
