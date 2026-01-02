@@ -1,13 +1,19 @@
 import crypto from "crypto";
 
 import { ensureSnapshotsTable, getLatestSnapshot, insertSnapshot, VERSION as DB_VERSION } from "@/lib/db";
-import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import {
+  filterItemsByDistributeurs,
+  getEmailConfigSummary,
+  getEmailRecipientConfigs,
+  sendAlertEmail,
+  VERSION as EMAIL_VERSION
+} from "@/lib/email";
 import { fetchDistributeurInfo } from "@/lib/distributeurs";
 import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.33";
+export const VERSION = "1.0.35";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -127,6 +133,20 @@ async function enrichItemsWithDistributeurs(items) {
   return results;
 }
 
+async function sendFilteredEmails({ recipientConfigs, buildContent }) {
+  const emailMessages = [];
+  for (const recipient of recipientConfigs) {
+    const content = buildContent(recipient);
+    if (!content) continue;
+    const emailMessageId = await sendAlertEmail({
+      ...content,
+      recipients: [recipient.email]
+    });
+    emailMessages.push({ email: recipient.email, messageId: emailMessageId });
+  }
+  return emailMessages;
+}
+
 function isAuthorized(req) {
   if (!CRON_SECRET) return true;
   const authHeader = req.headers.get("authorization") || "";
@@ -172,14 +192,36 @@ export async function GET(req) {
     const desiredEmailMode = normalizeEmailMode(CRON_EMAIL_MODE);
     const shouldSendLatest10 = desiredEmailMode === "latest10" || !latestSnapshot;
     const shouldSendDiff = desiredEmailMode === "diff" || desiredEmailMode === "auto";
+    const recipientConfigs = await getEmailRecipientConfigs();
+    if (recipientConfigs.length === 0) {
+      return Response.json(
+        {
+          error: "No alert email recipients configured.",
+          details: await buildEmailErrorDetails(
+            new Error("No alert email recipients configured.")
+          )
+        },
+        { status: 400 }
+      );
+    }
 
     if (shouldSendLatest10 && currentItems.length) {
       const testingItems = currentItems.slice(0, 10);
       const enrichedTestingItems = await enrichItemsWithDistributeurs(testingItems);
-      const content = buildTestingEmailContent(enrichedTestingItems);
       try {
-        emailMessageId = await sendAlertEmail(content);
-        emailMode = "test";
+        const emailMessages = await sendFilteredEmails({
+          recipientConfigs,
+          buildContent: (recipient) => {
+            const filteredItems = filterItemsByDistributeurs(
+              enrichedTestingItems,
+              recipient.distributeurs
+            );
+            if (!filteredItems.length) return null;
+            return buildTestingEmailContent(filteredItems);
+          }
+        });
+        emailMessageId = emailMessages[0]?.messageId || null;
+        emailMode = emailMessages.length ? "test" : "none";
       } catch (error) {
         return Response.json(
           { error: "Email send failed", details: await buildEmailErrorDetails(error) },
@@ -192,14 +234,34 @@ export async function GET(req) {
         enrichItemsWithDistributeurs(changedItems),
         enrichItemsWithDistributeurs(removedItems)
       ]);
-      const content = buildEmailContent({
-        newItems: enrichedNew,
-        changedItems: enrichedChanged,
-        removedItems: enrichedRemoved
-      });
       try {
-        emailMessageId = await sendAlertEmail(content);
-        emailMode = "diff";
+        const emailMessages = await sendFilteredEmails({
+          recipientConfigs,
+          buildContent: (recipient) => {
+            const filteredNew = filterItemsByDistributeurs(
+              enrichedNew,
+              recipient.distributeurs
+            );
+            const filteredChanged = filterItemsByDistributeurs(
+              enrichedChanged,
+              recipient.distributeurs
+            );
+            const filteredRemoved = filterItemsByDistributeurs(
+              enrichedRemoved,
+              recipient.distributeurs
+            );
+            if (!filteredNew.length && !filteredChanged.length && !filteredRemoved.length) {
+              return null;
+            }
+            return buildEmailContent({
+              newItems: filteredNew,
+              changedItems: filteredChanged,
+              removedItems: filteredRemoved
+            });
+          }
+        });
+        emailMessageId = emailMessages[0]?.messageId || null;
+        emailMode = emailMessages.length ? "diff" : "none";
       } catch (error) {
         return Response.json(
           { error: "Email send failed", details: await buildEmailErrorDetails(error) },

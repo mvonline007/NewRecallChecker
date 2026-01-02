@@ -1,10 +1,16 @@
-import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import {
+  filterItemsByDistributeurs,
+  getEmailConfigSummary,
+  getEmailRecipientConfigs,
+  sendAlertEmail,
+  VERSION as EMAIL_VERSION
+} from "@/lib/email";
 import { fetchDistributeurInfo } from "@/lib/distributeurs";
 import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.33";
+export const VERSION = "1.0.35";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -68,20 +74,43 @@ export async function POST(req) {
     }
 
     const enrichedItems = await enrichItemsWithDistributeurs(items);
-    const content = buildTestingEmailContent(enrichedItems);
-    let emailMessageId;
-    try {
-      emailMessageId = await sendAlertEmail(content);
-    } catch (error) {
+    const recipientConfigs = await getEmailRecipientConfigs();
+    if (recipientConfigs.length === 0) {
       return Response.json(
         {
-          error: error instanceof Error ? error.message : "Email send failed",
+          error: "No alert email recipients configured.",
           details: {
             emailConfig: await getEmailConfigSummary()
           }
         },
-        { status: 502 }
+        { status: 400 }
       );
+    }
+    const emailMessages = [];
+    for (const recipient of recipientConfigs) {
+      const filteredItems = filterItemsByDistributeurs(
+        enrichedItems,
+        recipient.distributeurs
+      );
+      if (!filteredItems.length) continue;
+      const content = buildTestingEmailContent(filteredItems);
+      try {
+        const emailMessageId = await sendAlertEmail({
+          ...content,
+          recipients: [recipient.email]
+        });
+        emailMessages.push({ email: recipient.email, messageId: emailMessageId });
+      } catch (error) {
+        return Response.json(
+          {
+            error: error instanceof Error ? error.message : "Email send failed",
+            details: {
+              emailConfig: await getEmailConfigSummary()
+            }
+          },
+          { status: 502 }
+        );
+      }
     }
 
     return Response.json(
@@ -91,7 +120,8 @@ export async function POST(req) {
           rss: RSS_VERSION,
           email: EMAIL_VERSION
         },
-        emailMessageId,
+        emailMessageId: emailMessages[0]?.messageId || null,
+        emailMessages,
         emailMode: "manual-test"
       },
       { status: 200 }
