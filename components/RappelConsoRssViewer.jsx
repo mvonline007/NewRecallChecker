@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.32";
+const APP_VERSION = "1.0.33";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -675,6 +675,12 @@ export default function RappelConsoRssViewer() {
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>
+            <a
+              href="/config"
+              className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+            >
+              Email config
+            </a>
 
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
               <label className="text-xs text-neutral-400" htmlFor="cron-secret">

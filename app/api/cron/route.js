@@ -7,7 +7,7 @@ import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.32";
+export const VERSION = "1.0.33";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -74,10 +74,10 @@ function buildEmailContent({ newItems, changedItems, removedItems }) {
   return { subject, text, html };
 }
 
-function buildEmailErrorDetails(error) {
+async function buildEmailErrorDetails(error) {
   return {
     message: error instanceof Error ? error.message : String(error),
-    emailConfig: getEmailConfigSummary()
+    emailConfig: await getEmailConfigSummary()
   };
 }
 
@@ -182,7 +182,7 @@ export async function GET(req) {
         emailMode = "test";
       } catch (error) {
         return Response.json(
-          { error: "Email send failed", details: buildEmailErrorDetails(error) },
+          { error: "Email send failed", details: await buildEmailErrorDetails(error) },
           { status: 502 }
         );
       }
@@ -202,7 +202,7 @@ export async function GET(req) {
         emailMode = "diff";
       } catch (error) {
         return Response.json(
-          { error: "Email send failed", details: buildEmailErrorDetails(error) },
+          { error: "Email send failed", details: await buildEmailErrorDetails(error) },
           { status: 502 }
         );
       }
