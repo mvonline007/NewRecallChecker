@@ -2,11 +2,12 @@ import crypto from "crypto";
 
 import { ensureSnapshotsTable, getLatestSnapshot, insertSnapshot, VERSION as DB_VERSION } from "@/lib/db";
 import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import { fetchDistributeurInfo } from "@/lib/distributeurs";
 import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.29";
+export const VERSION = "1.0.30";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -110,6 +111,22 @@ function buildTestingEmailContent(items) {
   return { subject, text, html };
 }
 
+async function enrichItemsWithDistributeurs(items) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const results = await Promise.all(
+    items.map(async (item) => {
+      if (!item?.link) return item;
+      try {
+        const info = await fetchDistributeurInfo(item.link);
+        return { ...item, ...info };
+      } catch {
+        return item;
+      }
+    })
+  );
+  return results;
+}
+
 function isAuthorized(req) {
   if (!CRON_SECRET) return true;
   const authHeader = req.headers.get("authorization") || "";
@@ -158,7 +175,8 @@ export async function GET(req) {
 
     if (shouldSendLatest10 && currentItems.length) {
       const testingItems = currentItems.slice(0, 10);
-      const content = buildTestingEmailContent(testingItems);
+      const enrichedTestingItems = await enrichItemsWithDistributeurs(testingItems);
+      const content = buildTestingEmailContent(enrichedTestingItems);
       try {
         emailMessageId = await sendAlertEmail(content);
         emailMode = "test";
@@ -169,7 +187,16 @@ export async function GET(req) {
         );
       }
     } else if (shouldSendDiff && latestSnapshot && hasDiff) {
-      const content = buildEmailContent({ newItems, changedItems, removedItems });
+      const [enrichedNew, enrichedChanged, enrichedRemoved] = await Promise.all([
+        enrichItemsWithDistributeurs(newItems),
+        enrichItemsWithDistributeurs(changedItems),
+        enrichItemsWithDistributeurs(removedItems)
+      ]);
+      const content = buildEmailContent({
+        newItems: enrichedNew,
+        changedItems: enrichedChanged,
+        removedItems: enrichedRemoved
+      });
       try {
         emailMessageId = await sendAlertEmail(content);
         emailMode = "diff";
