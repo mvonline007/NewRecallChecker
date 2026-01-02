@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.42";
+const APP_VERSION = "1.0.43";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -464,7 +464,7 @@ function GtinSearchPanel({ onOpenFiche }) {
     );
     const images = extractImageUrls(r);
 
-    const descriptionText = motif ? `Motif: ${String(motif)}` : "";
+    const descriptionText = motif ? String(motif) : "";
     const distLabel = getFirst(r, ["distributeurs", "distributeur"]) || "";
     const recordId = getFirst(r, ["record_id", "id"]) || `${idx}`;
 
@@ -519,7 +519,6 @@ function GtinSearchPanel({ onOpenFiche }) {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
             {card.pubDate && <Pill>{prettyDate(card.pubDate)}</Pill>}
-            {card.enclosureUrl && <Pill>image</Pill>}
             {card.distLabel && <Pill>{card.distLabel}</Pill>}
           </div>
           <div className="text-xs text-neutral-300/80 line-clamp-3">
