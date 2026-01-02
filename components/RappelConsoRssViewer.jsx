@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.30";
+const APP_VERSION = "1.0.31";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -1002,6 +1002,9 @@ export default function RappelConsoRssViewer() {
                 <div className="mt-2 space-y-2 text-sm text-neutral-200">
                   <div>
                     <span className="text-neutral-400">Distributeurs:</span> {detailsMap[selected.id].distributeursRaw || "(not found)"}
+                  </div>
+                  <div>
+                    <span className="text-neutral-400">Motif du rappel:</span> {detailsMap[selected.id].motifRaw || "(not found)"}
                   </div>
                 </div>
               </div>
