@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.47";
+const APP_VERSION = "1.0.48";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -359,6 +359,7 @@ function GtinSearchPanel({ onOpenFiche }) {
   const [lastUrl, setLastUrl] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
+  const [scannerMode, setScannerMode] = useState("auto");
   const abortRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -418,6 +419,30 @@ function GtinSearchPanel({ onOpenFiche }) {
   function closeScanner() {
     setScannerOpen(false);
     stopScanner();
+  }
+
+  function buildScannerConstraints(mode) {
+    if (mode === "rear") {
+      return { video: { facingMode: { ideal: "environment" } } };
+    }
+    if (mode === "front") {
+      return { video: { facingMode: { ideal: "user" } } };
+    }
+    if (mode === "highres") {
+      return {
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+    }
+    return { video: true };
+  }
+
+  function openScanner(mode) {
+    setScannerMode(mode);
+    setScannerOpen(true);
   }
 
   async function runSearch(gtinsToSearch) {
@@ -504,9 +529,7 @@ function GtinSearchPanel({ onOpenFiche }) {
 
     const startNativeDetector = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(buildScannerConstraints(scannerMode));
         if (!active) return;
         streamRef.current = stream;
         const video = videoRef.current;
@@ -547,7 +570,7 @@ function GtinSearchPanel({ onOpenFiche }) {
       try {
         const reader = new BrowserMultiFormatReader();
         zxingReaderRef.current = reader;
-        const constraints = { video: { facingMode: { ideal: "environment" } } };
+        const constraints = buildScannerConstraints(scannerMode);
         reader.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
           if (!active) return;
           if (result?.getText) {
@@ -578,7 +601,7 @@ function GtinSearchPanel({ onOpenFiche }) {
       active = false;
       stopScanner();
     };
-  }, [scannerOpen]);
+  }, [scannerOpen, scannerMode]);
 
   useEffect(() => {
     try {
@@ -741,10 +764,31 @@ function GtinSearchPanel({ onOpenFiche }) {
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
                 <button
                   type="button"
-                  onClick={() => setScannerOpen(true)}
+                  onClick={() => openScanner("auto")}
                   className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
                 >
-                  Scanner avec la caméra
+                  Scanner (auto)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openScanner("rear")}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                >
+                  Scanner (caméra arrière)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openScanner("front")}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                >
+                  Scanner (caméra avant)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openScanner("highres")}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                >
+                  Scanner (HD)
                 </button>
                 <span>Autorisez la caméra pour remplir automatiquement le GTIN.</span>
               </div>
@@ -839,6 +883,16 @@ function GtinSearchPanel({ onOpenFiche }) {
 
       <Modal open={scannerOpen} onClose={closeScanner} title="Scanner un code-barres">
         <div className="space-y-3">
+          <div className="text-xs text-neutral-400">
+            Mode actuel:{" "}
+            {scannerMode === "rear"
+              ? "caméra arrière"
+              : scannerMode === "front"
+              ? "caméra avant"
+              : scannerMode === "highres"
+              ? "HD"
+              : "auto"}
+          </div>
           <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
             <video
               ref={videoRef}

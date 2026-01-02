@@ -1,7 +1,7 @@
 import { fetchDistributeurInfo, VERSION as DISTRIBUTEUR_VERSION } from "@/lib/distributeurs";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.47";
+export const VERSION = "1.0.48";
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
