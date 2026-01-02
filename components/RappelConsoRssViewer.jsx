@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { BrowserMultiFormatReader, NotFoundException } from "@zxing/browser";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 import {
   BarChart,
   Bar,
@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.45";
+const APP_VERSION = "1.0.46";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -561,7 +561,7 @@ function GtinSearchPanel({ onOpenFiche }) {
             }
             return;
           }
-          if (err && !(err instanceof NotFoundException)) {
+          if (err && err?.name !== "NotFoundException") {
             setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
           }
         });
