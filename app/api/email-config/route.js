@@ -7,7 +7,7 @@ import {
 import { getEmailConfigSummary, VERSION as EMAIL_VERSION } from "@/lib/email";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.37";
+export const VERSION = "1.0.38";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 

@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.37";
+const APP_VERSION = "1.0.38";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -407,7 +407,7 @@ function GtinSearchPanel({ onOpenFiche }) {
     } catch {}
   }, []);
 
-  const renderCard = (r, idx) => {
+  const buildGtinCardData = (r, idx) => {
     const title =
       getFirst(r, [
         "titre_de_la_fiche",
@@ -418,7 +418,7 @@ function GtinSearchPanel({ onOpenFiche }) {
         "produit"
       ]) || `Résultat #${idx + 1}`;
 
-    const brand = getFirst(r, ["marque", "brand"]) || "";
+    const brand = getFirst(r, ["marque", "brand"]);
     const pubDate = getFirst(r, ["date_publication", "date_de_publication", "date"]) || "";
     const ficheUrl = getFirst(r, [
       "lien_vers_la_fiche_rappelconso",
@@ -426,14 +426,7 @@ function GtinSearchPanel({ onOpenFiche }) {
       "url_fiche",
       "lien_vers_la_fiche_rappelconso_2"
     ]);
-
-    const images = toArray(
-      getFirst(r, ["liens_vers_les_images", "liens_images", "images", "enclosure_url"])
-    );
-    const refs = toArray(
-      getFirst(r, ["modeles_ou_references", "modeles_ou_reference", "references", "modele_reference"])
-    );
-
+    const gtin = getFirst(r, ["gtin", "gtins"]);
     const category = getFirst(r, ["categorie_de_produit", "categorie", "category"]);
     const subcat = getFirst(r, ["sous_categorie_produit", "sous_categorie", "subcategory"]);
     const risk = getFirst(r, ["risques_encourus", "risque", "risk"]);
@@ -443,20 +436,60 @@ function GtinSearchPanel({ onOpenFiche }) {
       "conduite_a_tenir",
       "action"
     ]);
+    const refs = toArray(
+      getFirst(r, ["modeles_ou_references", "modeles_ou_reference", "references", "modele_reference"])
+    );
+    const images = toArray(
+      getFirst(r, ["liens_vers_les_images", "liens_images", "images", "enclosure_url"])
+    );
 
+    const descriptionParts = [
+      gtin ? `GTIN: ${gtin}` : null,
+      risk ? `Risque: ${String(risk)}` : null,
+      motif ? `Motif: ${String(motif)}` : null,
+      consigne ? `Conduite: ${String(consigne)}` : null,
+      refs.length ? `Références: ${refs.slice(0, 3).join(" · ")}` : null
+    ].filter(Boolean);
+
+    const descriptionText = descriptionParts.join(" • ");
+    const distLabel = brand || category || subcat || "";
+    const recordId = getFirst(r, ["record_id", "id"]) || `${idx}`;
+
+    return {
+      id: recordId,
+      title,
+      enclosureUrl: images[0],
+      pubDate,
+      link: ficheUrl,
+      descriptionText,
+      distLabel
+    };
+  };
+
+  const renderCard = (r, idx) => {
+    const card = buildGtinCardData(r, idx);
     return (
       <div
-        key={`${title}-${idx}`}
+        key={card.id}
+        role="button"
+        tabIndex={0}
         className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (card.link) onOpenFiche?.(card.link);
+          }
+        }}
       >
         <div className="relative aspect-[16/10] w-full overflow-hidden">
-          <ImageWithFallback src={images[0]} alt={title} />
-          {ficheUrl && (
+          <ImageWithFallback src={card.enclosureUrl} alt={card.title} />
+          {card.link && (
             <div className="absolute right-2 top-2">
               <button
                 type="button"
-                onClick={() => onOpenFiche?.(ficheUrl)}
+                onClick={() => onOpenFiche?.(card.link)}
                 className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
+                title="Open fiche inside app"
               >
                 Fiche
               </button>
@@ -465,48 +498,42 @@ function GtinSearchPanel({ onOpenFiche }) {
         </div>
 
         <div className="space-y-2 p-4">
-          <div className="text-sm font-semibold text-neutral-100 line-clamp-2">{title}</div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-            {brand && <Pill>{brand}</Pill>}
-            {pubDate && <Pill>{prettyDate(pubDate)}</Pill>}
-            {category && <Pill>{category}</Pill>}
+          <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
+            {card.title || "(no title)"}
           </div>
-          {subcat && <div className="text-xs text-neutral-400">Sous-catégorie: {subcat}</div>}
-          {risk && <div className="text-xs text-neutral-300/90 line-clamp-2">Risque: {String(risk)}</div>}
-          {motif && (
-            <div className="text-xs text-neutral-300/80 line-clamp-2">Motif: {String(motif)}</div>
-          )}
-          {consigne && (
-            <div className="text-xs text-neutral-300/70 line-clamp-2">
-              Conduite: {String(consigne)}
-            </div>
-          )}
-          {refs.length ? (
-            <div className="text-xs text-neutral-400">Références: {refs.slice(0, 3).join(" · ")}</div>
-          ) : null}
-          {images.length > 1 && (
-            <div className="text-xs text-neutral-500">+{images.length - 1} images</div>
-          )}
-          <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
-            {ficheUrl && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+            {card.pubDate && <Pill>{prettyDate(card.pubDate)}</Pill>}
+            {card.enclosureUrl && <Pill>image</Pill>}
+            {card.distLabel && <Pill>{card.distLabel}</Pill>}
+          </div>
+          <div className="text-xs text-neutral-300/80 line-clamp-3">
+            {card.descriptionText || "(no description)"}
+          </div>
+
+          {card.link && (
+            <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
               <button
                 type="button"
-                onClick={() => onOpenFiche?.(ficheUrl)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenFiche?.(card.link);
+                }}
                 className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
               >
                 Open fiche
               </button>
-            )}
-            {ficheUrl && (
               <button
                 type="button"
-                onClick={() => copyText(ficheUrl)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  copyText(card.link);
+                }}
                 className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
               >
                 Copy link
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     );
