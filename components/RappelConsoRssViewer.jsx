@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { BrowserMultiFormatReader, NotFoundException } from "@zxing/browser";
 import {
   BarChart,
   Bar,
@@ -14,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.44";
+const APP_VERSION = "1.0.45";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -362,6 +363,8 @@ function GtinSearchPanel({ onOpenFiche }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectorRef = useRef(null);
+  const zxingReaderRef = useRef(null);
+  const rafRef = useRef(null);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
@@ -394,6 +397,10 @@ function GtinSearchPanel({ onOpenFiche }) {
   }
 
   function stopScanner() {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -402,6 +409,10 @@ function GtinSearchPanel({ onOpenFiche }) {
       videoRef.current.srcObject = null;
     }
     detectorRef.current = null;
+    if (zxingReaderRef.current) {
+      zxingReaderRef.current.reset();
+      zxingReaderRef.current = null;
+    }
   }
 
   function closeScanner() {
@@ -491,7 +502,7 @@ function GtinSearchPanel({ onOpenFiche }) {
 
     let active = true;
 
-    const start = async () => {
+    const startNativeDetector = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" }
@@ -523,15 +534,47 @@ function GtinSearchPanel({ onOpenFiche }) {
           } catch (err) {
             setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
           }
-          requestAnimationFrame(tick);
+          rafRef.current = requestAnimationFrame(tick);
         };
-        requestAnimationFrame(tick);
+        rafRef.current = requestAnimationFrame(tick);
       } catch (err) {
         setScannerError("Accès caméra refusé ou indisponible.");
       }
     };
 
-    start();
+    const startZxing = async () => {
+      if (!videoRef.current) return;
+      try {
+        const reader = new BrowserMultiFormatReader();
+        zxingReaderRef.current = reader;
+        const devices = await reader.listVideoInputDevices();
+        const preferred = devices.find((d) => /back|rear|environment/i.test(d.label));
+        const deviceId = (preferred || devices[0])?.deviceId ?? null;
+        reader.decodeFromVideoDevice(deviceId, videoRef.current, (result, err) => {
+          if (!active) return;
+          if (result?.getText) {
+            const cleaned = String(result.getText()).replace(/[^0-9]/g, "");
+            if (cleaned) {
+              closeScanner();
+              setGtinRaw(cleaned);
+              runSearch(normalizeGtinInput(cleaned));
+            }
+            return;
+          }
+          if (err && !(err instanceof NotFoundException)) {
+            setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+          }
+        });
+      } catch (err) {
+        setScannerError("Accès caméra refusé ou indisponible.");
+      }
+    };
+
+    if ("BarcodeDetector" in window) {
+      startNativeDetector();
+    } else {
+      startZxing();
+    }
 
     return () => {
       active = false;
@@ -817,6 +860,9 @@ function GtinSearchPanel({ onOpenFiche }) {
           )}
           <div className="text-xs text-neutral-500">
             Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+          </div>
+          <div className="text-xs text-neutral-500">
+            iPhone: utilisez Safari/Chrome avec autorisation caméra (HTTPS requis).
           </div>
         </div>
       </Modal>
