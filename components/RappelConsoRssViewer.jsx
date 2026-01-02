@@ -14,7 +14,21 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.36";
+const APP_VERSION = "1.0.37";
+const GTIN_DOMAIN = "https://data.economie.gouv.fr";
+const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
+const GTIN_DATASETS = {
+  trie: {
+    id: "rappelconso-v2-gtin-trie",
+    label: "V2 (trié par GTIN)",
+    hint: "1 GTIN par ligne (indexé) — meilleur pour une recherche exacte"
+  },
+  espaces: {
+    id: "rappelconso-v2-gtin-espaces",
+    label: "V2 (GTIN espacés)",
+    hint: "Plusieurs GTIN possibles dans un même champ (séparés par espace)"
+  }
+};
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -68,6 +82,73 @@ function stripHtml(html) {
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
+}
+
+function normalizeGtinInput(raw) {
+  const parts = String(raw)
+    .split(/[^0-9]+/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const uniq = [];
+  for (const p of parts) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      uniq.push(p);
+    }
+  }
+  return uniq;
+}
+
+function buildWhereExactGtins(fieldName, gtins) {
+  if (!gtins.length) return "";
+  if (gtins.length === 1) return `${fieldName} = \"${gtins[0]}\"`;
+  return `(${gtins.map((g) => `${fieldName} = \"${g}\"`).join(" OR ")})`;
+}
+
+function buildWhereContainsGtin(fieldName, gtin) {
+  return `${fieldName} like \"%${gtin}%\"`;
+}
+
+function getFirst(obj, keys) {
+  for (const k of keys) {
+    if (obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== "") return obj[k];
+  }
+  return undefined;
+}
+
+function toArray(v) {
+  if (v === undefined || v === null) return [];
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") {
+    const parts = v
+      .split(/\s*[,;\n\r]+\s*/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return parts.length ? parts : [v];
+  }
+  return [v];
+}
+
+function prettyDate(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function buildRecordsUrl(datasetId, params) {
+  const url = new URL(`${GTIN_API_BASE}/${datasetId}/records`);
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === "") return;
+    sp.set(k, String(v));
+  });
+  url.search = sp.toString();
+  return url.toString();
 }
 
 function formatEmailConfig(config) {
@@ -220,6 +301,335 @@ function ImageWithFallback({ src, alt }) {
   );
 }
 
+function GtinSearchPanel({ onOpenFiche }) {
+  const [mode, setMode] = useState("auto");
+  const [gtinRaw, setGtinRaw] = useState("");
+  const [limit, setLimit] = useState(50);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [hits, setHits] = useState(0);
+  const [datasetUsed, setDatasetUsed] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [lastUrl, setLastUrl] = useState("");
+  const abortRef = useRef(null);
+
+  const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
+
+  async function fetchRecords(datasetId, whereClause) {
+    const url = buildRecordsUrl(datasetId, {
+      limit,
+      where: whereClause,
+      order_by: "date_publication desc"
+    });
+
+    setLastUrl(url);
+
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+
+    const res = await fetch(url, {
+      signal: abortRef.current.signal,
+      headers: { Accept: "application/json" }
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(
+        `HTTP ${res.status} ${res.statusText}${txt ? ` — ${txt.slice(0, 200)}` : ""}`
+      );
+    }
+
+    const data = await res.json();
+    const total = data?.total_count ?? data?.nhits ?? 0;
+    const results = data?.results ?? data?.records ?? [];
+    return { total, results };
+  }
+
+  async function search() {
+    setError("");
+    setRecords([]);
+    setHits(0);
+    setDatasetUsed(null);
+
+    if (!gtins.length) {
+      setError("GTIN requis (ex: 3250391234567)");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const tryTrie = async () => {
+        const where = buildWhereExactGtins("gtin", gtins);
+        const out = await fetchRecords(GTIN_DATASETS.trie.id, where);
+        setDatasetUsed("trie");
+        return out;
+      };
+
+      const tryEspaces = async () => {
+        if (gtins.length === 1) {
+          const where = buildWhereContainsGtin("gtin", gtins[0]);
+          const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
+          setDatasetUsed("espaces");
+          return out;
+        }
+        const where = `(${gtins.map((g) => buildWhereContainsGtin("gtin", g)).join(" OR ")})`;
+        const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
+        setDatasetUsed("espaces");
+        return out;
+      };
+
+      let out;
+      if (mode === "trie") out = await tryTrie();
+      else if (mode === "espaces") out = await tryEspaces();
+      else {
+        out = await tryTrie();
+        if (!out.total) {
+          out = await tryEspaces();
+        }
+      }
+
+      setHits(out.total);
+      setRecords(out.results);
+    } catch (e) {
+      if (String(e?.name) === "AbortError") return;
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    try {
+      const u = new URL(window.location.href);
+      const g = u.searchParams.get("gtin");
+      if (g) setGtinRaw(g);
+    } catch {}
+  }, []);
+
+  const renderCard = (r, idx) => {
+    const title =
+      getFirst(r, [
+        "titre_de_la_fiche",
+        "titre",
+        "title",
+        "nom_du_produit",
+        "nom_produit",
+        "produit"
+      ]) || `Résultat #${idx + 1}`;
+
+    const brand = getFirst(r, ["marque", "brand"]) || "";
+    const pubDate = getFirst(r, ["date_publication", "date_de_publication", "date"]) || "";
+    const ficheUrl = getFirst(r, [
+      "lien_vers_la_fiche_rappelconso",
+      "lien_vers_la_fiche",
+      "url_fiche",
+      "lien_vers_la_fiche_rappelconso_2"
+    ]);
+
+    const images = toArray(
+      getFirst(r, ["liens_vers_les_images", "liens_images", "images", "enclosure_url"])
+    );
+    const refs = toArray(
+      getFirst(r, ["modeles_ou_references", "modeles_ou_reference", "references", "modele_reference"])
+    );
+
+    const category = getFirst(r, ["categorie_de_produit", "categorie", "category"]);
+    const subcat = getFirst(r, ["sous_categorie_produit", "sous_categorie", "subcategory"]);
+    const risk = getFirst(r, ["risques_encourus", "risque", "risk"]);
+    const motif = getFirst(r, ["motif_du_rappel", "motif", "reason"]);
+    const consigne = getFirst(r, [
+      "conduites_a_tenir_par_le_consommateur",
+      "conduite_a_tenir",
+      "action"
+    ]);
+
+    return (
+      <div
+        key={`${title}-${idx}`}
+        className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
+      >
+        <div className="relative aspect-[16/10] w-full overflow-hidden">
+          <ImageWithFallback src={images[0]} alt={title} />
+          {ficheUrl && (
+            <div className="absolute right-2 top-2">
+              <button
+                type="button"
+                onClick={() => onOpenFiche?.(ficheUrl)}
+                className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
+              >
+                Fiche
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2 p-4">
+          <div className="text-sm font-semibold text-neutral-100 line-clamp-2">{title}</div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+            {brand && <Pill>{brand}</Pill>}
+            {pubDate && <Pill>{prettyDate(pubDate)}</Pill>}
+            {category && <Pill>{category}</Pill>}
+          </div>
+          {subcat && <div className="text-xs text-neutral-400">Sous-catégorie: {subcat}</div>}
+          {risk && <div className="text-xs text-neutral-300/90 line-clamp-2">Risque: {String(risk)}</div>}
+          {motif && (
+            <div className="text-xs text-neutral-300/80 line-clamp-2">Motif: {String(motif)}</div>
+          )}
+          {consigne && (
+            <div className="text-xs text-neutral-300/70 line-clamp-2">
+              Conduite: {String(consigne)}
+            </div>
+          )}
+          {refs.length ? (
+            <div className="text-xs text-neutral-400">Références: {refs.slice(0, 3).join(" · ")}</div>
+          ) : null}
+          {images.length > 1 && (
+            <div className="text-xs text-neutral-500">+{images.length - 1} images</div>
+          )}
+          <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
+            {ficheUrl && (
+              <button
+                type="button"
+                onClick={() => onOpenFiche?.(ficheUrl)}
+                className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
+              >
+                Open fiche
+              </button>
+            )}
+            {ficheUrl && (
+              <button
+                type="button"
+                onClick={() => copyText(ficheUrl)}
+                className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
+              >
+                Copy link
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+        <div className="flex flex-col gap-4">
+          <div className="space-y-1">
+            <div className="text-lg font-semibold">Recherche GTIN</div>
+            <div className="text-xs text-neutral-400">
+              Source: {GTIN_DATASETS.trie.id} / {GTIN_DATASETS.espaces.id}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+            <div className="md:col-span-6">
+              <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
+              <input
+                value={gtinRaw}
+                onChange={(e) => setGtinRaw(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") search();
+                }}
+                placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
+                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+              />
+              <div className="mt-1 text-xs text-neutral-500">
+                Normalisé: {gtins.length ? gtins.join(", ") : "—"}
+              </div>
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="text-xs text-neutral-400">Dataset</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+              >
+                <option value="auto">Auto (trie → fallback espaces)</option>
+                <option value="trie">{GTIN_DATASETS.trie.label}</option>
+                <option value="espaces">{GTIN_DATASETS.espaces.label}</option>
+              </select>
+              <div className="mt-1 text-xs text-neutral-500">
+                {mode === "trie"
+                  ? GTIN_DATASETS.trie.hint
+                  : mode === "espaces"
+                  ? GTIN_DATASETS.espaces.hint
+                  : "Recherche exacte puis fallback"}
+              </div>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="text-xs text-neutral-400">Limit</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={limit}
+                onChange={(e) => setLimit(Math.max(1, Math.min(100, Number(e.target.value || 50))))}
+                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+              />
+              <div className="mt-1 text-xs text-neutral-500">1–100</div>
+            </div>
+
+            <div className="md:col-span-1 flex items-end">
+              <button
+                onClick={search}
+                disabled={loading}
+                className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
+              >
+                {loading ? "…" : "Search"}
+              </button>
+            </div>
+          </div>
+
+          {error ? (
+            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-300">
+            <div>
+              {datasetUsed ? (
+                <>
+                  Dataset: <span className="font-medium">{GTIN_DATASETS[datasetUsed].id}</span> •
+                  Résultats: <span className="font-medium">{hits}</span>
+                </>
+              ) : (
+                <>Prêt</>
+              )}
+            </div>
+            {lastUrl ? (
+              <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
+                Ouvrir requête JSON
+              </a>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {records.map((r, i) => renderCard(r, i))}
+      </div>
+
+      {!loading && datasetUsed && !records.length && !error ? (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
+          Aucun résultat.
+          <div className="mt-2 text-neutral-500">
+            Tips: vérifier le GTIN (13 chiffres), ou passer sur “V2 (GTIN espacés)”.
+          </div>
+        </div>
+      ) : null}
+
+      <div className="text-xs text-neutral-500">
+        Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
+      </div>
+    </div>
+  );
+}
+
 function useOnClickOutside(ref, handler) {
   useEffect(() => {
     function onDown(e) {
@@ -336,6 +746,7 @@ export default function RappelConsoRssViewer() {
   const [detailsMap, setDetailsMap] = useState({});
   const [detailsProgress, setDetailsProgress] = useState({ loaded: 0, total: 0, errors: 0 });
 
+  const [activeTab, setActiveTab] = useState("rss");
   const [mode, setMode] = useState("gallery");
   const [q, setQ] = useState("");
   const [onlyWithImages, setOnlyWithImages] = useState(false);
@@ -628,173 +1039,206 @@ export default function RappelConsoRssViewer() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              className={classNames(
-                "rounded-xl border px-3 py-2 text-sm",
-                mode === "gallery"
-                  ? "border-neutral-200 bg-neutral-100 text-neutral-950"
-                  : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-              )}
-              onClick={() => setMode("gallery")}
-            >
-              Gallery
-            </button>
-
-            <button
-              className={classNames(
-                "rounded-xl border px-3 py-2 text-sm",
-                mode === "list"
-                  ? "border-neutral-200 bg-neutral-100 text-neutral-950"
-                  : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-              )}
-              onClick={() => setMode("list")}
-            >
-              List
-            </button>
-
-            <button
-              className={classNames(
-                "rounded-xl border px-3 py-2 text-sm",
-                mode === "stats"
-                  ? "border-neutral-200 bg-neutral-100 text-neutral-950"
-                  : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-              )}
-              onClick={() => setMode("stats")}
-            >
-              Stats
-            </button>
-
-            <button
-              className={classNames(
-                "rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900",
-                loading && "opacity-60"
-              )}
-              onClick={refresh}
-              disabled={loading}
-            >
-              {loading ? "Refreshing…" : "Refresh"}
-            </button>
-            <a
-              href="/config"
-              className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
-            >
-              Email config
-            </a>
-
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
-              <label className="text-xs text-neutral-400" htmlFor="cron-secret">
-                Cron secret
-              </label>
-              <input
-                id="cron-secret"
-                type="password"
-                className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
-                placeholder="Optional"
-                value={cronSecret}
-                onChange={(event) => setCronSecret(event.target.value)}
-              />
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 className={classNames(
-                  "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
-                  testEmailSending && "opacity-60"
+                  "rounded-xl border px-3 py-2 text-sm",
+                  activeTab === "rss"
+                    ? "border-neutral-200 bg-neutral-100 text-neutral-950"
+                    : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
                 )}
-                onClick={sendTestEmail}
-                disabled={testEmailSending}
+                onClick={() => setActiveTab("rss")}
               >
-                {testEmailSending ? "Sending…" : "Send test email"}
+                RSS dashboard
               </button>
               <button
-                className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                onClick={() => {
-                  setPreviewKey((val) => val + 1);
-                  setPreviewOpen(true);
-                }}
-                type="button"
+                className={classNames(
+                  "rounded-xl border px-3 py-2 text-sm",
+                  activeTab === "gtin"
+                    ? "border-neutral-200 bg-neutral-100 text-neutral-950"
+                    : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                )}
+                onClick={() => setActiveTab("gtin")}
               >
-                Preview email
+                GTIN search
               </button>
-              {testEmailStatus && (
-                <span className="flex flex-col text-xs">
-                  <span
-                    className={classNames(
-                      testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
-                    )}
-                  >
-                    {testEmailStatus.message}
-                  </span>
-                  {testEmailStatus.details && (
-                    <span className="text-neutral-400">{testEmailStatus.details}</span>
+            </div>
+
+            {activeTab === "rss" && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  className={classNames(
+                    "rounded-xl border px-3 py-2 text-sm",
+                    mode === "gallery"
+                      ? "border-neutral-200 bg-neutral-100 text-neutral-950"
+                      : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
                   )}
-                </span>
+                  onClick={() => setMode("gallery")}
+                >
+                  Gallery
+                </button>
+
+                <button
+                  className={classNames(
+                    "rounded-xl border px-3 py-2 text-sm",
+                    mode === "list"
+                      ? "border-neutral-200 bg-neutral-100 text-neutral-950"
+                      : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                  )}
+                  onClick={() => setMode("list")}
+                >
+                  List
+                </button>
+
+                <button
+                  className={classNames(
+                    "rounded-xl border px-3 py-2 text-sm",
+                    mode === "stats"
+                      ? "border-neutral-200 bg-neutral-100 text-neutral-950"
+                      : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                  )}
+                  onClick={() => setMode("stats")}
+                >
+                  Stats
+                </button>
+
+                <button
+                  className={classNames(
+                    "rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900",
+                    loading && "opacity-60"
+                  )}
+                  onClick={refresh}
+                  disabled={loading}
+                >
+                  {loading ? "Refreshing…" : "Refresh"}
+                </button>
+                <a
+                  href="/config"
+                  className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+                >
+                  Email config
+                </a>
+
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
+                  <label className="text-xs text-neutral-400" htmlFor="cron-secret">
+                    Cron secret
+                  </label>
+                  <input
+                    id="cron-secret"
+                    type="password"
+                    className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                    placeholder="Optional"
+                    value={cronSecret}
+                    onChange={(event) => setCronSecret(event.target.value)}
+                  />
+                  <button
+                    className={classNames(
+                      "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
+                      testEmailSending && "opacity-60"
+                    )}
+                    onClick={sendTestEmail}
+                    disabled={testEmailSending}
+                  >
+                    {testEmailSending ? "Sending…" : "Send test email"}
+                  </button>
+                  <button
+                    className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    onClick={() => {
+                      setPreviewKey((val) => val + 1);
+                      setPreviewOpen(true);
+                    }}
+                    type="button"
+                  >
+                    Preview email
+                  </button>
+                  {testEmailStatus && (
+                    <span className="flex flex-col text-xs">
+                      <span
+                        className={classNames(
+                          testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
+                        )}
+                      >
+                        {testEmailStatus.message}
+                      </span>
+                      {testEmailStatus.details && (
+                        <span className="text-neutral-400">{testEmailStatus.details}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {activeTab === "rss" && (
+          <>
+            <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-12">
+              <div className="md:col-span-5">
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search title/description/distributeur…"
+                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                />
+              </div>
+              <div className="md:col-span-3">
+                <label className="flex items-center gap-2 text-sm text-neutral-200">
+                  <input
+                    type="checkbox"
+                    checked={onlyWithImages}
+                    onChange={(e) => setOnlyWithImages(e.target.checked)}
+                    className="h-4 w-4 accent-neutral-200"
+                  />
+                  Only with images
+                </label>
+              </div>
+              <div className="md:col-span-2">
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                  title="From date"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                  title="To date"
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <MultiSelectDropdown
+                label="Distributeurs"
+                options={distributeurOptions}
+                selected={selectedDistributeurs}
+                onChange={setSelectedDistributeurs}
+                hint="Values parsed from each item page (field: Distributeurs)."
+              />
+              {selectedDistributeurs.length ? (
+                <Pill>Active: {selectedDistributeurs.join(" | ")}</Pill>
+              ) : (
+                <Pill>Active: All</Pill>
               )}
             </div>
-          </div>
-        </div>
+          </>
+        )}
 
-        <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-12">
-          <div className="md:col-span-5">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search title/description/distributeur…"
-              className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-            />
-          </div>
-          <div className="md:col-span-3">
-            <label className="flex items-center gap-2 text-sm text-neutral-200">
-              <input
-                type="checkbox"
-                checked={onlyWithImages}
-                onChange={(e) => setOnlyWithImages(e.target.checked)}
-                className="h-4 w-4 accent-neutral-200"
-              />
-              Only with images
-            </label>
-          </div>
-          <div className="md:col-span-2">
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-              title="From date"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-              title="To date"
-            />
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <MultiSelectDropdown
-            label="Distributeurs"
-            options={distributeurOptions}
-            selected={selectedDistributeurs}
-            onChange={setSelectedDistributeurs}
-            hint="Values parsed from each item page (field: Distributeurs)."
-          />
-          {selectedDistributeurs.length ? (
-            <Pill>Active: {selectedDistributeurs.join(" | ")}</Pill>
-          ) : (
-            <Pill>Active: All</Pill>
-          )}
-        </div>
-
-        {err && (
+        {activeTab === "rss" && err && (
           <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">
             <div className="font-semibold">Fetch error</div>
             <div className="mt-1 text-red-200/90">{err}</div>
           </div>
         )}
 
-        {mode === "stats" && (
+        {activeTab === "rss" && mode === "stats" && (
           <div className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-sm font-semibold">Items per day (last 14 days in filtered set)</div>
@@ -818,7 +1262,7 @@ export default function RappelConsoRssViewer() {
           </div>
         )}
 
-        {mode !== "stats" && (
+        {activeTab === "rss" && mode !== "stats" && (
           <>
             <div className="mt-6">
               {mode === "gallery" ? (
@@ -963,6 +1407,17 @@ export default function RappelConsoRssViewer() {
               )}
             </div>
           </>
+        )}
+
+        {activeTab === "gtin" && (
+          <div className="mt-6">
+            <GtinSearchPanel onOpenFiche={(url) => {
+              if (url) {
+                setFicheUrl(url);
+                setFicheOpen(true);
+              }
+            }} />
+          </div>
         )}
       </div>
 
