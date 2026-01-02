@@ -14,7 +14,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.41";
+const APP_VERSION = "1.0.42";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -453,8 +453,7 @@ function GtinSearchPanel({ onOpenFiche }) {
     const gtin = getFirst(r, ["gtin", "gtins"]);
     const category = getFirst(r, ["categorie_de_produit", "categorie", "category"]);
     const subcat = getFirst(r, ["sous_categorie_produit", "sous_categorie", "subcategory"]);
-    const risk = getFirst(r, ["risques_encourus", "risque", "risk"]);
-    const motif = getFirst(r, ["motif_du_rappel", "motif", "reason"]);
+    const motif = getFirst(r, ["motif_rappel", "motif_du_rappel", "motif", "reason"]);
     const consigne = getFirst(r, [
       "conduites_a_tenir_par_le_consommateur",
       "conduite_a_tenir",
@@ -465,16 +464,8 @@ function GtinSearchPanel({ onOpenFiche }) {
     );
     const images = extractImageUrls(r);
 
-    const descriptionParts = [
-      gtin ? `GTIN: ${gtin}` : null,
-      risk ? `Risque: ${String(risk)}` : null,
-      motif ? `Motif: ${String(motif)}` : null,
-      consigne ? `Conduite: ${String(consigne)}` : null,
-      refs.length ? `Références: ${refs.slice(0, 3).join(" · ")}` : null
-    ].filter(Boolean);
-
-    const descriptionText = descriptionParts.join(" • ");
-    const distLabel = brand || category || subcat || "";
+    const descriptionText = motif ? `Motif: ${String(motif)}` : "";
+    const distLabel = getFirst(r, ["distributeurs", "distributeur"]) || "";
     const recordId = getFirst(r, ["record_id", "id"]) || `${idx}`;
 
     return {
