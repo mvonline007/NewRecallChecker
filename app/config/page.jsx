@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export const VERSION = "1.0.34";
+export const VERSION = "1.0.35";
 
 const emptyStatus = { type: "", message: "" };
 
@@ -18,14 +18,6 @@ function formatRecipientConfig(entry) {
   return `${entry.email} (${distributeurs.join(", ")})`;
 }
 
-function splitDistributeurs(value) {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function formatDate(value) {
   if (!value) return "Unknown";
   const dt = new Date(value);
@@ -34,13 +26,26 @@ function formatDate(value) {
 }
 
 export default function ConfigPage() {
-  const [recipientConfigs, setRecipientConfigs] = useState([{ email: "", distributeurs: "" }]);
+  const [recipientConfigs, setRecipientConfigs] = useState([
+    { email: "", distributeurs: [] }
+  ]);
+  const [distributeurOptions, setDistributeurOptions] = useState([]);
   const [cronSecret, setCronSecret] = useState("");
   const [status, setStatus] = useState(emptyStatus);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState(null);
   const [summary, setSummary] = useState(null);
+
+  const loadDistributeurs = async (headers) => {
+    try {
+      const res = await fetch("/api/distributeurs", { headers, cache: "no-store" });
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(payload?.distributeurs)) {
+        setDistributeurOptions(payload.distributeurs);
+      }
+    } catch {}
+  };
 
   const loadConfig = async () => {
     setLoading(true);
@@ -50,7 +55,10 @@ export default function ConfigPage() {
       if (cronSecret.trim()) {
         headers.Authorization = `Bearer ${cronSecret.trim()}`;
       }
-      const res = await fetch("/api/email-config", { headers, cache: "no-store" });
+      const [res] = await Promise.all([
+        fetch("/api/email-config", { headers, cache: "no-store" }),
+        loadDistributeurs(headers)
+      ]);
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
         setStatus({
@@ -64,12 +72,12 @@ export default function ConfigPage() {
       const loadedRecipients = Array.isArray(payload?.config?.recipients)
         ? payload.config.recipients.map((entry) => ({
             email: entry.email || "",
-            distributeurs: Array.isArray(entry.distributeurs)
-              ? entry.distributeurs.join(", ")
-              : ""
+            distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : []
           }))
         : [];
-      setRecipientConfigs(loadedRecipients.length ? loadedRecipients : [{ email: "", distributeurs: "" }]);
+      setRecipientConfigs(
+        loadedRecipients.length ? loadedRecipients : [{ email: "", distributeurs: [] }]
+      );
       setStatus({ type: "success", message: "Configuration loaded." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unexpected error";
@@ -90,7 +98,7 @@ export default function ConfigPage() {
       const recipientsPayload = recipientConfigs
         .map((entry) => ({
           email: entry.email.trim(),
-          distributeurs: splitDistributeurs(entry.distributeurs)
+          distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : []
         }))
         .filter((entry) => entry.email);
       const res = await fetch("/api/email-config", {
@@ -111,9 +119,7 @@ export default function ConfigPage() {
       const savedRecipients = Array.isArray(payload?.config?.recipients)
         ? payload.config.recipients.map((entry) => ({
             email: entry.email || "",
-            distributeurs: Array.isArray(entry.distributeurs)
-              ? entry.distributeurs.join(", ")
-              : ""
+            distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : []
           }))
         : [];
       setRecipientConfigs(savedRecipients.length ? savedRecipients : recipientConfigs);
@@ -164,16 +170,34 @@ export default function ConfigPage() {
                     placeholder="alerts@example.com"
                   />
                   <label className="text-xs text-neutral-400">Distributeurs filter (optional)</label>
-                  <input
+                  <select
+                    multiple
                     value={entry.distributeurs}
                     onChange={(event) => {
+                      const selected = Array.from(event.target.selectedOptions).map(
+                        (option) => option.value
+                      );
                       const next = [...recipientConfigs];
-                      next[index] = { ...next[index], distributeurs: event.target.value };
+                      next[index] = { ...next[index], distributeurs: selected };
                       setRecipientConfigs(next);
                     }}
                     className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400"
-                    placeholder="Carrefour, Leclerc"
-                  />
+                  >
+                    {distributeurOptions.length === 0 ? (
+                      <option disabled value="">
+                        No distributeurs available
+                      </option>
+                    ) : (
+                      distributeurOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <div className="text-xs text-neutral-500">
+                    Select one or more distributeurs (leave empty for all).
+                  </div>
                   <div className="flex justify-end">
                     <button
                       type="button"
@@ -192,7 +216,7 @@ export default function ConfigPage() {
                 type="button"
                 className="rounded-xl border border-neutral-700 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
                 onClick={() =>
-                  setRecipientConfigs([...recipientConfigs, { email: "", distributeurs: "" }])
+                  setRecipientConfigs([...recipientConfigs, { email: "", distributeurs: [] }])
                 }
               >
                 Add recipient
