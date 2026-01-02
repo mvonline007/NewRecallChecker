@@ -2,10 +2,11 @@ import crypto from "crypto";
 
 import { ensureSnapshotsTable, getLatestSnapshot, insertSnapshot, VERSION as DB_VERSION } from "@/lib/db";
 import { getEmailConfigSummary, sendAlertEmail, VERSION as EMAIL_VERSION } from "@/lib/email";
+import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.28";
+export const VERSION = "1.0.29";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -58,24 +59,16 @@ function buildEmailContent({ newItems, changedItems, removedItems }) {
     formatList(removedItems) || "- none"
   ].join("\n");
 
-  const htmlList = (items) =>
-    items.length
-      ? `<ul>${items
-          .map(
-            (item) =>
-              `<li><a href="${item.link || "#"}">${item.title || item.id}</a></li>`
-          )
-          .join("")}</ul>`
-      : "<p>- none</p>";
-
-  const html = `
-    <p>New items (${newItems.length}):</p>
-    ${htmlList(newItems)}
-    <p>Changed items (${changedItems.length}):</p>
-    ${htmlList(changedItems)}
-    <p>Removed items (${removedItems.length}):</p>
-    ${htmlList(removedItems)}
-  `;
+  const html = buildEmailHtml({
+    title: "RappelConso updates",
+    intro: "Latest changes detected in the RappelConso RSS feed.",
+    sections: [
+      { title: "New items", items: newItems },
+      { title: "Changed items", items: changedItems },
+      { title: "Removed items", items: removedItems }
+    ],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
 
   return { subject, text, html };
 }
@@ -107,20 +100,12 @@ function buildTestingEmailContent(items) {
     formatList(items) || "- none"
   ].join("\n");
 
-  const htmlList = (list) =>
-    list.length
-      ? `<ul>${list
-          .map(
-            (item) =>
-              `<li><a href="${item.link || "#"}">${item.title || item.id}</a></li>`
-          )
-          .join("")}</ul>`
-      : "<p>- none</p>";
-
-  const html = `
-    <p>Cron test email: latest 10 items from the RSS feed.</p>
-    ${htmlList(items)}
-  `;
+  const html = buildEmailHtml({
+    title: "RappelConso latest items",
+    intro: "Cron test email: latest 10 items from the RSS feed.",
+    sections: [{ title: "Latest 10 items", items }],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
 
   return { subject, text, html };
 }
