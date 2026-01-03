@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.55";
+const APP_VERSION = "1.0.56";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -367,12 +367,14 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
   const zxingReaderRef = useRef(null);
   const rafRef = useRef(null);
   const scanStartRef = useRef(0);
+  const lastScannedRef = useRef("");
+  const lastScanAtRef = useRef(0);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
-  async function fetchRecords(datasetId, whereClause) {
+  async function fetchRecords(datasetId, whereClause, limitOverride = limit) {
     const url = buildRecordsUrl(datasetId, {
-      limit,
+      limit: limitOverride,
       where: whereClause,
       order_by: "date_publication desc"
     });
@@ -460,7 +462,8 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     setCameraTestOpen(true);
   }
 
-  async function runSearch(gtinsToSearch) {
+  async function runSearch(gtinsToSearch, options = {}) {
+    const { limitOverride, clearInput = true } = options;
     const inputGtins = gtinsToSearch ?? gtins;
     setError("");
     setRecords([]);
@@ -477,7 +480,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     try {
       const tryTrie = async () => {
         const where = buildWhereExactGtins("gtin", inputGtins);
-        const out = await fetchRecords(GTIN_DATASETS.trie.id, where);
+        const out = await fetchRecords(GTIN_DATASETS.trie.id, where, limitOverride);
         setDatasetUsed("trie");
         return out;
       };
@@ -485,14 +488,14 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       const tryEspaces = async () => {
         if (inputGtins.length === 1) {
           const where = buildWhereContainsGtin("gtin", inputGtins[0]);
-          const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
+          const out = await fetchRecords(GTIN_DATASETS.espaces.id, where, limitOverride);
           setDatasetUsed("espaces");
           return out;
         }
         const where = `(${inputGtins
           .map((g) => buildWhereContainsGtin("gtin", g))
           .join(" OR ")})`;
-        const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
+        const out = await fetchRecords(GTIN_DATASETS.espaces.id, where, limitOverride);
         setDatasetUsed("espaces");
         return out;
       };
@@ -508,14 +511,28 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       }
 
       setHits(out.total);
-      setRecords(out.results);
+      setRecords(limitOverride === 1 ? out.results.slice(0, 1) : out.results);
     } catch (e) {
       if (String(e?.name) === "AbortError") return;
       setError(String(e?.message || e));
     } finally {
-      setGtinRaw("");
+      if (clearInput) {
+        setGtinRaw("");
+      }
       setLoading(false);
     }
+  }
+
+  async function handleDetectedGtin(cleaned) {
+    if (!cleaned) return;
+    const now = Date.now();
+    if (cleaned === lastScannedRef.current && now - lastScanAtRef.current < 2000) {
+      return;
+    }
+    lastScannedRef.current = cleaned;
+    lastScanAtRef.current = now;
+    setGtinRaw(cleaned);
+    await runSearch(normalizeGtinInput(cleaned), { limitOverride: 1, clearInput: false });
   }
 
   async function search() {
@@ -558,9 +575,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
               const rawValue = barcodes[0]?.rawValue || "";
               const cleaned = String(rawValue).replace(/[^0-9]/g, "");
               if (cleaned) {
-                closeCameraTest();
-                setGtinRaw(cleaned);
-                runSearch(normalizeGtinInput(cleaned));
+                await handleDetectedGtin(cleaned);
                 return;
               }
             }
@@ -588,9 +603,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
           if (result?.getText) {
             const cleaned = String(result.getText()).replace(/[^0-9]/g, "");
             if (cleaned) {
-              closeCameraTest();
-              setGtinRaw(cleaned);
-              runSearch(normalizeGtinInput(cleaned));
+              handleDetectedGtin(cleaned);
             }
             return;
           }
