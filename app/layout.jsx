@@ -1,6 +1,6 @@
 import "./globals.css";
 
-export const VERSION = "1.0.78";
+export const VERSION = "1.0.79";
 
 export const metadata = {
   title: "Rappel Conso",

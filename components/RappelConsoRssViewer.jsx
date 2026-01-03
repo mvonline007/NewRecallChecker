@@ -6,7 +6,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.78";
+const APP_VERSION = "1.0.79";
 const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
 const LS_GTIN_CAMERA_HIDE_MS = "rappelconso_gtin_camera_hide_ms_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
@@ -1149,6 +1149,7 @@ export default function RappelConsoRssViewer() {
   const [cameraResultHideMs, setCameraResultHideMs] = useState(1500);
   const [q, setQ] = useState("");
   const [selectedDistributeurs, setSelectedDistributeurs] = useState([]);
+  const [prefersDark, setPrefersDark] = useState(false);
 
   const [selected, setSelected] = useState(null);
   const [ficheOpen, setFicheOpen] = useState(false);
@@ -1352,6 +1353,19 @@ export default function RappelConsoRssViewer() {
   useEffect(() => {
     writeJsonLS(LS_GTIN_CAMERA_HIDE_MS, cameraResultHideMs);
   }, [cameraResultHideMs]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setPrefersDark(media.matches);
+    update();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", update);
+      return () => media.removeEventListener("change", update);
+    }
+    media.addListener(update);
+    return () => media.removeListener(update);
+  }, []);
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
 
@@ -1634,7 +1648,12 @@ export default function RappelConsoRssViewer() {
                           alt={`EAN-13 ${code}`}
                           src={`https://bwipjs-api.metafloor.com/?bcid=ean13&text=${code}&scale=2&height=12&includetext`}
                           className="mt-2 w-full bg-neutral-900/40 p-2"
+                          style={{ filter: prefersDark ? "invert(1)" : "none" }}
                         />
+                        <div className="mt-1 text-[11px] text-neutral-500">
+                          Affichage {prefersDark ? "inversé" : "standard"} pour le mode{" "}
+                          {prefersDark ? "sombre" : "clair"}.
+                        </div>
                       </div>
                     ))}
                   </div>
