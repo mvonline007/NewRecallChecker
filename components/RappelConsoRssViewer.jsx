@@ -6,7 +6,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.73";
+const APP_VERSION = "1.0.74";
 const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";

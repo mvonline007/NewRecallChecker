@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-export const VERSION = "1.0.73";
+export const VERSION = "1.0.74";
 
 const emptyStatus = { type: "", message: "" };
 const CRON_SCHEDULE = "0 6 * * *";
@@ -15,8 +15,9 @@ function formatRecipients(list) {
 function formatRecipientConfig(entry) {
   if (!entry?.email) return "";
   const distributeurs = Array.isArray(entry.distributeurs) ? entry.distributeurs : [];
-  if (!distributeurs.length) return `${entry.email} (all distributeurs)`;
-  return `${entry.email} (${distributeurs.join(", ")})`;
+  const modeSuffix = entry.onlyNewItems ? " · new only (fallback latest 10)" : "";
+  if (!distributeurs.length) return `${entry.email} (all distributeurs)${modeSuffix}`;
+  return `${entry.email} (${distributeurs.join(", ")})${modeSuffix}`;
 }
 
 function formatDate(value) {
@@ -75,7 +76,7 @@ function Modal({ open, onClose, title, children }) {
 
 export default function ConfigPage() {
   const [recipientConfigs, setRecipientConfigs] = useState([
-    { email: "", distributeurs: [], filter: "" }
+    { email: "", distributeurs: [], filter: "", onlyNewItems: false }
   ]);
   const [distributeurOptions, setDistributeurOptions] = useState([]);
   const [cronSecret, setCronSecret] = useState("");
@@ -125,13 +126,14 @@ export default function ConfigPage() {
         ? payload.config.recipients.map((entry) => ({
             email: entry.email || "",
             distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : [],
-            filter: ""
+            filter: "",
+            onlyNewItems: Boolean(entry.onlyNewItems)
           }))
         : [];
       setRecipientConfigs(
         loadedRecipients.length
           ? loadedRecipients
-          : [{ email: "", distributeurs: [], filter: "" }]
+          : [{ email: "", distributeurs: [], filter: "", onlyNewItems: false }]
       );
       setStatus({ type: "success", message: "Configuration loaded." });
     } catch (error) {
@@ -153,7 +155,8 @@ export default function ConfigPage() {
       const recipientsPayload = recipientConfigs
         .map((entry) => ({
           email: entry.email.trim(),
-          distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : []
+          distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : [],
+          onlyNewItems: Boolean(entry.onlyNewItems)
         }))
         .filter((entry) => entry.email);
       const res = await fetch("/api/email-config", {
@@ -175,7 +178,8 @@ export default function ConfigPage() {
         ? payload.config.recipients.map((entry) => ({
             email: entry.email || "",
             distributeurs: Array.isArray(entry.distributeurs) ? entry.distributeurs : [],
-            filter: ""
+            filter: "",
+            onlyNewItems: Boolean(entry.onlyNewItems)
           }))
         : [];
       setRecipientConfigs(savedRecipients.length ? savedRecipients : recipientConfigs);
@@ -326,6 +330,19 @@ export default function ConfigPage() {
                     <div className="text-xs text-neutral-500">
                       Select one or more distributeurs (leave empty for all).
                     </div>
+                    <label className="flex items-center gap-2 text-xs text-neutral-300">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-neutral-200"
+                        checked={Boolean(entry.onlyNewItems)}
+                        onChange={(event) => {
+                          const next = [...recipientConfigs];
+                          next[index] = { ...next[index], onlyNewItems: event.target.checked };
+                          setRecipientConfigs(next);
+                        }}
+                      />
+                      Only new items (if none, send latest 10)
+                    </label>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <button
                         type="button"
@@ -344,7 +361,9 @@ export default function ConfigPage() {
                         onClick={() => {
                           const next = recipientConfigs.filter((_, i) => i !== index);
                           setRecipientConfigs(
-                            next.length ? next : [{ email: "", distributeurs: [], filter: "" }]
+                            next.length
+                              ? next
+                              : [{ email: "", distributeurs: [], filter: "", onlyNewItems: false }]
                           );
                         }}
                       >
@@ -360,7 +379,7 @@ export default function ConfigPage() {
                 onClick={() =>
                   setRecipientConfigs([
                     ...recipientConfigs,
-                    { email: "", distributeurs: [], filter: "" }
+                    { email: "", distributeurs: [], filter: "", onlyNewItems: false }
                   ])
                 }
               >

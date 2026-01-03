@@ -13,7 +13,7 @@ import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.73";
+export const VERSION = "1.0.74";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -80,6 +80,41 @@ function buildEmailContent({ newItems, changedItems, removedItems }) {
   return { subject, text, html };
 }
 
+function buildNewItemsEmailContent(items) {
+  const subject = `RappelConso new items: ${items.length}`;
+  const formatList = (list) =>
+    list.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
+  const text = [
+    `New items (${items.length}):`,
+    formatList(items) || "- none"
+  ].join("\n");
+  const html = buildEmailHtml({
+    title: "RappelConso new items",
+    intro: "Latest new items detected in the RappelConso RSS feed.",
+    sections: [{ title: "New items", items }],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
+  return { subject, text, html };
+}
+
+function buildLatestItemsEmailContent(items, intro) {
+  const subject = `RappelConso latest items: ${items.length}`;
+  const formatList = (list) =>
+    list.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
+  const text = [
+    intro || "Latest 10 items from the RSS feed.",
+    "",
+    formatList(items) || "- none"
+  ].join("\n");
+  const html = buildEmailHtml({
+    title: "RappelConso latest items",
+    intro: intro || "Latest 10 items from the RSS feed.",
+    sections: [{ title: "Latest 10 items", items }],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
+  return { subject, text, html };
+}
+
 async function buildEmailErrorDetails(error) {
   return {
     message: error instanceof Error ? error.message : String(error),
@@ -94,27 +129,6 @@ function normalizeEmailMode(mode) {
   if (normalized === "diff") return "diff";
   if (normalized === "latest10") return "latest10";
   return "auto";
-}
-
-function buildTestingEmailContent(items) {
-  const subject = "RappelConso cron test: latest 10 items";
-  const formatList = (list) =>
-    list.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
-
-  const text = [
-    "Cron test email: latest 10 items from the RSS feed.",
-    "",
-    formatList(items) || "- none"
-  ].join("\n");
-
-  const html = buildEmailHtml({
-    title: "RappelConso latest items",
-    intro: "Cron test email: latest 10 items from the RSS feed.",
-    sections: [{ title: "Latest 10 items", items }],
-    footer: "View the full feed in the RappelConso RSS dashboard."
-  });
-
-  return { subject, text, html };
 }
 
 async function enrichItemsWithDistributeurs(items) {
@@ -136,7 +150,7 @@ async function enrichItemsWithDistributeurs(items) {
 async function sendFilteredEmails({ recipientConfigs, buildContent }) {
   const emailMessages = [];
   for (const recipient of recipientConfigs) {
-    const content = buildContent(recipient);
+    const content = await buildContent(recipient);
     if (!content) continue;
     const emailMessageId = await sendAlertEmail({
       ...content,
@@ -193,6 +207,7 @@ export async function GET(req) {
     const shouldSendLatest10 = desiredEmailMode === "latest10" || !latestSnapshot;
     const shouldSendDiff = desiredEmailMode === "diff" || desiredEmailMode === "auto";
     const recipientConfigs = await getEmailRecipientConfigs();
+    const hasRecipientOnlyNew = recipientConfigs.some((entry) => entry.onlyNewItems);
     if (recipientConfigs.length === 0) {
       return Response.json(
         {
@@ -205,63 +220,99 @@ export async function GET(req) {
       );
     }
 
-    if (shouldSendLatest10 && currentItems.length) {
-      const testingItems = currentItems.slice(0, 10);
-      const enrichedTestingItems = await enrichItemsWithDistributeurs(testingItems);
+    if ((shouldSendLatest10 && currentItems.length) || (shouldSendDiff && latestSnapshot && hasDiff) || hasRecipientOnlyNew) {
+      const latestItems = currentItems.slice(0, 10);
+      let enrichedLatest = null;
+      let enrichedNew = null;
+      let enrichedChanged = null;
+      let enrichedRemoved = null;
+      const getEnrichedLatest = async () => {
+        if (!enrichedLatest) {
+          enrichedLatest = await enrichItemsWithDistributeurs(latestItems);
+        }
+        return enrichedLatest;
+      };
+      const getEnrichedNew = async () => {
+        if (!enrichedNew) {
+          enrichedNew = await enrichItemsWithDistributeurs(newItems);
+        }
+        return enrichedNew;
+      };
+      const getEnrichedChanged = async () => {
+        if (!enrichedChanged) {
+          enrichedChanged = await enrichItemsWithDistributeurs(changedItems);
+        }
+        return enrichedChanged;
+      };
+      const getEnrichedRemoved = async () => {
+        if (!enrichedRemoved) {
+          enrichedRemoved = await enrichItemsWithDistributeurs(removedItems);
+        }
+        return enrichedRemoved;
+      };
       try {
         const emailMessages = await sendFilteredEmails({
           recipientConfigs,
-          buildContent: (recipient) => {
-            const filteredItems = filterItemsByDistributeurs(
-              enrichedTestingItems,
-              recipient.distributeurs
-            );
-            if (!filteredItems.length) return null;
-            return buildTestingEmailContent(filteredItems);
-          }
-        });
-        emailMessageId = emailMessages[0]?.messageId || null;
-        emailMode = emailMessages.length ? "test" : "none";
-      } catch (error) {
-        return Response.json(
-          { error: "Email send failed", details: await buildEmailErrorDetails(error) },
-          { status: 502 }
-        );
-      }
-    } else if (shouldSendDiff && latestSnapshot && hasDiff) {
-      const [enrichedNew, enrichedChanged, enrichedRemoved] = await Promise.all([
-        enrichItemsWithDistributeurs(newItems),
-        enrichItemsWithDistributeurs(changedItems),
-        enrichItemsWithDistributeurs(removedItems)
-      ]);
-      try {
-        const emailMessages = await sendFilteredEmails({
-          recipientConfigs,
-          buildContent: (recipient) => {
-            const filteredNew = filterItemsByDistributeurs(
-              enrichedNew,
-              recipient.distributeurs
-            );
-            const filteredChanged = filterItemsByDistributeurs(
-              enrichedChanged,
-              recipient.distributeurs
-            );
-            const filteredRemoved = filterItemsByDistributeurs(
-              enrichedRemoved,
-              recipient.distributeurs
-            );
-            if (!filteredNew.length && !filteredChanged.length && !filteredRemoved.length) {
-              return null;
+          buildContent: async (recipient) => {
+            if (recipient.onlyNewItems) {
+              const filteredNew = filterItemsByDistributeurs(
+                await getEnrichedNew(),
+                recipient.distributeurs
+              );
+              if (filteredNew.length) {
+                return buildNewItemsEmailContent(filteredNew);
+              }
+              const filteredLatest = filterItemsByDistributeurs(
+                await getEnrichedLatest(),
+                recipient.distributeurs
+              );
+              if (!filteredLatest.length) return null;
+              return buildLatestItemsEmailContent(
+                filteredLatest,
+                "No new items detected; sending the latest 10 items instead."
+              );
             }
-            return buildEmailContent({
-              newItems: filteredNew,
-              changedItems: filteredChanged,
-              removedItems: filteredRemoved
-            });
+            if (shouldSendLatest10 && currentItems.length) {
+              const filteredLatest = filterItemsByDistributeurs(
+                await getEnrichedLatest(),
+                recipient.distributeurs
+              );
+              if (!filteredLatest.length) return null;
+              return buildLatestItemsEmailContent(filteredLatest);
+            }
+            if (shouldSendDiff && latestSnapshot && hasDiff) {
+              const filteredNew = filterItemsByDistributeurs(
+                await getEnrichedNew(),
+                recipient.distributeurs
+              );
+              const filteredChanged = filterItemsByDistributeurs(
+                await getEnrichedChanged(),
+                recipient.distributeurs
+              );
+              const filteredRemoved = filterItemsByDistributeurs(
+                await getEnrichedRemoved(),
+                recipient.distributeurs
+              );
+              if (!filteredNew.length && !filteredChanged.length && !filteredRemoved.length) {
+                return null;
+              }
+              return buildEmailContent({
+                newItems: filteredNew,
+                changedItems: filteredChanged,
+                removedItems: filteredRemoved
+              });
+            }
+            return null;
           }
         });
         emailMessageId = emailMessages[0]?.messageId || null;
-        emailMode = emailMessages.length ? "diff" : "none";
+        if (emailMessages.length) {
+          emailMode = hasRecipientOnlyNew
+            ? "recipient-config"
+            : shouldSendLatest10 && currentItems.length
+            ? "test"
+            : "diff";
+        }
       } catch (error) {
         return Response.json(
           { error: "Email send failed", details: await buildEmailErrorDetails(error) },
