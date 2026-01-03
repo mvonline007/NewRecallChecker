@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-export const VERSION = "1.0.75";
+export const VERSION = "1.0.81";
 
 const emptyStatus = { type: "", message: "" };
 const CRON_SCHEDULE = "0 6 * * *";

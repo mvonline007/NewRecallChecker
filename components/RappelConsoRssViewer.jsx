@@ -6,8 +6,9 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.75";
+const APP_VERSION = "1.0.81";
 const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
+const LS_GTIN_CAMERA_HIDE_MS = "rappelconso_gtin_camera_hide_ms_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
@@ -337,7 +338,7 @@ function extractImageUrls(record) {
   return urls;
 }
 
-function GtinSearchPanel({ onOpenFiche, mode }) {
+function GtinSearchPanel({ onOpenFiche, mode, cameraResultHideMs = 1500, autoStartCamera = false }) {
   const [gtinRaw, setGtinRaw] = useState("");
   const limit = 50;
   const [loading, setLoading] = useState(false);
@@ -729,6 +730,14 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     };
   };
 
+  const clearResults = () => {
+    setRecords([]);
+    setSafeResult(false);
+    setHits(0);
+    setDatasetUsed(null);
+    setError("");
+  };
+
   const renderCardFromData = (card) => (
     <div
       key={card.id}
@@ -737,12 +746,14 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
       onClick={() => {
         if (card.link) onOpenFiche?.(card.link);
+        clearResults();
       }}
       onKeyDown={(e) => {
         if (!card.link) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onOpenFiche?.(card.link);
+          clearResults();
         }
       }}
     >
@@ -753,6 +764,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
             <button
               type="button"
               onClick={() => onOpenFiche?.(card.link)}
+              onMouseUp={clearResults}
               className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
               title="Open fiche inside app"
             >
@@ -816,6 +828,23 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     });
 
   const showSafeCard = safeResult || (!loading && datasetUsed && !records.length && !error);
+
+  useEffect(() => {
+    if (!cameraTestOpen || !scanActive) return undefined;
+    if (!cameraResultHideMs || cameraResultHideMs <= 0) return undefined;
+    if (records.length || !showSafeCard) return undefined;
+    const t = setTimeout(() => {
+      clearResults();
+    }, cameraResultHideMs);
+    return () => clearTimeout(t);
+  }, [cameraTestOpen, scanActive, cameraResultHideMs, records.length, showSafeCard]);
+
+  useEffect(() => {
+    if (!autoStartCamera) return;
+    if (cameraTestOpen) return;
+    openScanner("rear");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartCamera]);
 
   return (
     <div className="space-y-4">
@@ -1117,8 +1146,10 @@ export default function RappelConsoRssViewer() {
 
   const [activeTab, setActiveTab] = useState("rss");
   const [gtinDatasetMode, setGtinDatasetMode] = useState("auto");
+  const [cameraResultHideMs, setCameraResultHideMs] = useState(1500);
   const [q, setQ] = useState("");
   const [selectedDistributeurs, setSelectedDistributeurs] = useState([]);
+  const [prefersDark, setPrefersDark] = useState(false);
 
   const [selected, setSelected] = useState(null);
   const [ficheOpen, setFicheOpen] = useState(false);
@@ -1240,6 +1271,10 @@ export default function RappelConsoRssViewer() {
     if (Array.isArray(savedDistributeurs)) {
       setSelectedDistributeurs(savedDistributeurs);
     }
+    const savedCameraHide = readJsonLS(LS_GTIN_CAMERA_HIDE_MS, 1500);
+    if (Number.isFinite(savedCameraHide) && savedCameraHide >= 0) {
+      setCameraResultHideMs(savedCameraHide);
+    }
 
     return () => {
       abortRef.current?.abort?.();
@@ -1314,6 +1349,23 @@ export default function RappelConsoRssViewer() {
   useEffect(() => {
     writeJsonLS(LS_SELECTED_DISTRIBUTEURS, selectedDistributeurs);
   }, [selectedDistributeurs]);
+
+  useEffect(() => {
+    writeJsonLS(LS_GTIN_CAMERA_HIDE_MS, cameraResultHideMs);
+  }, [cameraResultHideMs]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setPrefersDark(media.matches);
+    update();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", update);
+      return () => media.removeEventListener("change", update);
+    }
+    media.addListener(update);
+    return () => media.removeListener(update);
+  }, []);
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
 
@@ -1532,7 +1584,7 @@ export default function RappelConsoRssViewer() {
                 setFicheUrl(url);
                 setFicheOpen(true);
               }
-            }} mode={gtinDatasetMode} />
+            }} mode={gtinDatasetMode} cameraResultHideMs={cameraResultHideMs} autoStartCamera />
           </div>
         )}
         {activeTab === "config" && (
@@ -1557,6 +1609,53 @@ export default function RappelConsoRssViewer() {
                       : gtinDatasetMode === "espaces"
                       ? GTIN_DATASETS.espaces.hint
                       : "Recherche exacte puis fallback"}
+                  </div>
+                </div>
+                <div className="md:max-w-md">
+                  <label className="text-xs text-neutral-400">Camera result hide delay (seconds)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={cameraResultHideMs / 1000}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === "") {
+                        setCameraResultHideMs(0);
+                        return;
+                      }
+                      const parsed = Number(next);
+                      if (!Number.isFinite(parsed)) return;
+                      setCameraResultHideMs(Math.max(0, Math.round(parsed * 1000)));
+                    }}
+                    className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+                  />
+                  <div className="mt-1 text-xs text-neutral-500">
+                    Masque le résultat uniquement si aucun produit n&apos;est trouvé (par défaut: 1,5s).
+                  </div>
+                </div>
+                <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+                  <div className="text-sm font-semibold text-neutral-100">Test barcodes (EAN-13)</div>
+                  <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {[
+                      "3481130002183",
+                      "3350033716407"
+                    ].map((code) => (
+                      <div key={code} className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+                        <div className="text-xs text-neutral-400">EAN-13</div>
+                        <div className="mt-1 text-sm text-neutral-200">{code}</div>
+                        <img
+                          alt={`EAN-13 ${code}`}
+                          src={`https://bwipjs-api.metafloor.com/?bcid=ean13&text=${code}&scale=4&height=12&includetext`}
+                          className={`mt-2 w-full max-w-[220px] p-2 mx-auto ${prefersDark ? "bg-white" : "bg-neutral-900/40"}`}
+                          style={{ filter: "none", imageRendering: "auto" }}
+                        />
+                        <div className="mt-1 text-[11px] text-neutral-500">
+                          Affichage {prefersDark ? "fond blanc" : "standard"} pour le mode{" "}
+                          {prefersDark ? "sombre" : "clair"}.
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <div className="text-xs text-neutral-500">
