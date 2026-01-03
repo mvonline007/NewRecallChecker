@@ -15,7 +15,8 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.55";
+const APP_VERSION = "1.0.66";
+const SAFE_BADGE_SRC = "/safe-badge.svg";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -367,12 +368,15 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
   const zxingReaderRef = useRef(null);
   const rafRef = useRef(null);
   const scanStartRef = useRef(0);
+  const lastScannedRef = useRef("");
+  const lastScanAtRef = useRef(0);
+  const scanBusyRef = useRef(false);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
-  async function fetchRecords(datasetId, whereClause) {
+  async function fetchRecords(datasetId, whereClause, limitOverride = limit) {
     const url = buildRecordsUrl(datasetId, {
-      limit,
+      limit: limitOverride,
       where: whereClause,
       order_by: "date_publication desc"
     });
@@ -460,7 +464,8 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     setCameraTestOpen(true);
   }
 
-  async function runSearch(gtinsToSearch) {
+  async function runSearch(gtinsToSearch, options = {}) {
+    const { limitOverride, clearInput = true } = options;
     const inputGtins = gtinsToSearch ?? gtins;
     setError("");
     setRecords([]);
@@ -477,7 +482,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     try {
       const tryTrie = async () => {
         const where = buildWhereExactGtins("gtin", inputGtins);
-        const out = await fetchRecords(GTIN_DATASETS.trie.id, where);
+        const out = await fetchRecords(GTIN_DATASETS.trie.id, where, limitOverride);
         setDatasetUsed("trie");
         return out;
       };
@@ -485,14 +490,14 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       const tryEspaces = async () => {
         if (inputGtins.length === 1) {
           const where = buildWhereContainsGtin("gtin", inputGtins[0]);
-          const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
+          const out = await fetchRecords(GTIN_DATASETS.espaces.id, where, limitOverride);
           setDatasetUsed("espaces");
           return out;
         }
         const where = `(${inputGtins
           .map((g) => buildWhereContainsGtin("gtin", g))
           .join(" OR ")})`;
-        const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
+        const out = await fetchRecords(GTIN_DATASETS.espaces.id, where, limitOverride);
         setDatasetUsed("espaces");
         return out;
       };
@@ -508,13 +513,35 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       }
 
       setHits(out.total);
-      setRecords(out.results);
+      setRecords(limitOverride === 1 ? out.results.slice(0, 1) : out.results);
     } catch (e) {
       if (String(e?.name) === "AbortError") return;
       setError(String(e?.message || e));
     } finally {
-      setGtinRaw("");
+      if (clearInput) {
+        setGtinRaw("");
+      }
       setLoading(false);
+    }
+  }
+
+  async function handleDetectedGtin(cleaned) {
+    if (!cleaned) return;
+    const now = Date.now();
+    if (cleaned === lastScannedRef.current && now - lastScanAtRef.current < 2000) {
+      return;
+    }
+    if (scanBusyRef.current) {
+      return;
+    }
+    lastScannedRef.current = cleaned;
+    lastScanAtRef.current = now;
+    setGtinRaw(cleaned);
+    scanBusyRef.current = true;
+    try {
+      await runSearch(normalizeGtinInput(cleaned), { limitOverride: 1, clearInput: false });
+    } finally {
+      scanBusyRef.current = false;
     }
   }
 
@@ -558,16 +585,11 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
               const rawValue = barcodes[0]?.rawValue || "";
               const cleaned = String(rawValue).replace(/[^0-9]/g, "");
               if (cleaned) {
-                closeCameraTest();
-                setGtinRaw(cleaned);
-                runSearch(normalizeGtinInput(cleaned));
-                return;
+                await handleDetectedGtin(cleaned);
               }
             }
           } catch (err) {
-            if (Date.now() - scanStartRef.current > 1500) {
-              setCameraTestError("Impossible de détecter le code-barres. Ajustez la mise au point.");
-            }
+            // Keep scanning without surfacing a transient detection error.
           }
           rafRef.current = requestAnimationFrame(tick);
         };
@@ -588,16 +610,12 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
           if (result?.getText) {
             const cleaned = String(result.getText()).replace(/[^0-9]/g, "");
             if (cleaned) {
-              closeCameraTest();
-              setGtinRaw(cleaned);
-              runSearch(normalizeGtinInput(cleaned));
+              handleDetectedGtin(cleaned);
             }
             return;
           }
           if (err && err?.name !== "NotFoundException") {
-            if (Date.now() - scanStartRef.current > 1500) {
-              setCameraTestError("Impossible de détecter le code-barres. Ajustez la mise au point.");
-            }
+            // Keep scanning without surfacing a transient detection error.
           }
         });
       } catch (err) {
@@ -714,156 +732,167 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     };
   };
 
-  const renderCard = (r, idx) => {
-    const card = buildGtinCardData(r, idx);
-    return (
-      <div
-        key={card.id}
-        role="button"
-        tabIndex={0}
-        className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
-        onClick={() => {
-          if (card.link) onOpenFiche?.(card.link);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            if (card.link) onOpenFiche?.(card.link);
-          }
-        }}
-      >
-        <div className="relative aspect-[16/10] w-full overflow-hidden">
-          <ImageWithFallback src={card.enclosureUrl} alt={card.title} />
-          {card.link && (
-            <div className="absolute right-2 top-2">
-              <button
-                type="button"
-                onClick={() => onOpenFiche?.(card.link)}
-                className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
-                title="Open fiche inside app"
-              >
-                Fiche
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-2 p-4">
-          <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
-            {card.title || "(no title)"}
+  const renderCardFromData = (card) => (
+    <div
+      key={card.id}
+      role={card.link ? "button" : undefined}
+      tabIndex={card.link ? 0 : undefined}
+      className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
+      onClick={() => {
+        if (card.link) onOpenFiche?.(card.link);
+      }}
+      onKeyDown={(e) => {
+        if (!card.link) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenFiche?.(card.link);
+        }
+      }}
+    >
+      <div className="relative aspect-[16/10] w-full overflow-hidden">
+        <ImageWithFallback src={card.enclosureUrl} alt={card.title} />
+        {card.link && (
+          <div className="absolute right-2 top-2">
+            <button
+              type="button"
+              onClick={() => onOpenFiche?.(card.link)}
+              className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
+              title="Open fiche inside app"
+            >
+              Fiche
+            </button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-            {card.pubDate && <Pill>{prettyDate(card.pubDate)}</Pill>}
-            {card.distLabel && <Pill>{card.distLabel}</Pill>}
-          </div>
-          <div className="text-xs text-neutral-300/80 line-clamp-3">
-            {card.descriptionText || "(no description)"}
-          </div>
-
-          {card.link && (
-            <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenFiche?.(card.link);
-                }}
-                className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
-              >
-                Open fiche
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  copyText(card.link);
-                }}
-                className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
-              >
-                Copy link
-              </button>
-            </div>
-          )}
-        </div>
+        )}
       </div>
-    );
-  };
+
+      <div className="space-y-2 p-4">
+        <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
+          {card.title || "(no title)"}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+          {card.pubDate && <Pill>{prettyDate(card.pubDate)}</Pill>}
+          {card.distLabel && <Pill>{card.distLabel}</Pill>}
+        </div>
+        <div className="text-xs text-neutral-300/80 line-clamp-3">
+          {card.descriptionText || "(no description)"}
+        </div>
+
+        {card.link && (
+          <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenFiche?.(card.link);
+              }}
+              className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
+            >
+              Open fiche
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                copyText(card.link);
+              }}
+              className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
+            >
+              Copy link
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderCard = (r, idx) => renderCardFromData(buildGtinCardData(r, idx));
+
+  const renderSafeCard = () =>
+    renderCardFromData({
+      id: "safe-card",
+      title: "Produit non rappelé",
+      enclosureUrl: SAFE_BADGE_SRC,
+      pubDate: "",
+      link: "",
+      descriptionText: "At this time the good is safe.",
+      distLabel: ""
+    });
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
-        <div className="flex flex-col gap-4">
-          <div className="space-y-1">
-            <div className="text-lg font-semibold">Recherche GTIN</div>
-          </div>
+      {!cameraTestOpen ? (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+          <div className="flex flex-col gap-4">
+            <div className="space-y-1">
+              <div className="text-lg font-semibold">Recherche GTIN</div>
+            </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-            <div className="md:col-span-6">
-              <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
-              <div className="mt-1 flex items-center gap-2">
-                <input
-                  value={gtinRaw}
-                  onChange={(e) => setGtinRaw(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") search();
-                  }}
-                  placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
-                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-                />
-                <button
-                  onClick={search}
-                  disabled={loading}
-                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
-                >
-                  {loading ? "…" : "Search"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openScanner("rear")}
-                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
-                >
-                  Caméra
-                </button>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+              <div className="md:col-span-6">
+                <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    value={gtinRaw}
+                    onChange={(e) => setGtinRaw(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") search();
+                    }}
+                    placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
+                    className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                  />
+                  <button
+                    onClick={search}
+                    disabled={loading}
+                    className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
+                  >
+                    {loading ? "…" : "Search"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openScanner("rear")}
+                    className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
+                  >
+                    Caméra
+                  </button>
+                </div>
               </div>
+
+              <div className="md:col-span-6 text-xs text-neutral-500" />
             </div>
 
-            <div className="md:col-span-6 text-xs text-neutral-500" />
-          </div>
-
-          {error ? (
-            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {error}
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-300">
-            <div />
-            {lastUrl ? (
-              <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
-                Ouvrir requête JSON
-              </a>
+            {error ? (
+              <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {error}
+              </div>
             ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-300">
+              <div />
+              {lastUrl ? (
+                <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
+                  Ouvrir requête JSON
+                </a>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {records.map((r, i) => renderCard(r, i))}
-      </div>
-
-      {!loading && datasetUsed && !records.length && !error ? (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
-          At this time the good is safe.
         </div>
       ) : null}
 
-      <Modal
-        open={cameraTestOpen}
-        onClose={closeCameraTest}
-        title={scanActive ? "Scanner un code-barres" : "Tester la caméra"}
-      >
-        <div className="space-y-3">
-          <div className="text-xs text-neutral-400">
+      {cameraTestOpen ? (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-lg font-semibold">
+              {scanActive ? "Scanner un code-barres" : "Tester la caméra"}
+            </div>
+            <button
+              type="button"
+              onClick={closeCameraTest}
+              className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+            >
+              Fermer
+            </button>
+          </div>
+          <div className="mt-1 text-xs text-neutral-400">
             Mode actuel:{" "}
             {cameraTestMode === "rear"
               ? "caméra arrière"
@@ -873,76 +902,104 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
               ? "HD"
               : "auto"}
           </div>
-          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
-            <video
-              ref={videoRef}
-              className="h-[320px] w-full object-cover"
-              muted
-              autoPlay
-              playsInline
-            />
-          </div>
-          {cameraTestError ? (
-            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {cameraTestError}
+          <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+            <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
+              <video
+                ref={videoRef}
+                className="h-[120px] w-full object-cover"
+                muted
+                autoPlay
+                playsInline
+              />
             </div>
-          ) : (
-            <div className="text-sm text-neutral-300">
-              {scanActive
-                ? "Placez le code-barres dans le cadre pour le détecter automatiquement."
-                : "Prévisualisez la caméra pour valider l'accès et la mise au point."}
+            <div className="space-y-3 text-sm text-neutral-300">
+              {cameraTestError ? (
+                <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  {cameraTestError}
+                </div>
+              ) : null}
+              <details className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-400">
+                <summary className="cursor-pointer select-none text-neutral-300">
+                  Aide &amp; options scanner
+                </summary>
+                <span className="mt-2 block space-y-2">
+                  <span className="block text-sm text-neutral-300">
+                    {scanActive
+                      ? "Placez le code-barres dans le cadre pour le détecter automatiquement."
+                      : "Prévisualisez la caméra pour valider l'accès et la mise au point."}
+                  </span>
+                  <span className="flex flex-wrap gap-2 text-xs text-neutral-400">
+                    {scanActive ? (
+                      <button
+                        type="button"
+                        onClick={() => openCameraTest(cameraTestMode)}
+                        className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                      >
+                        Passer en test caméra
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openScanner(cameraTestMode)}
+                        className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+                      >
+                        Activer le scan
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => (scanActive ? openScanner("auto") : openCameraTest("auto"))}
+                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    >
+                      Relancer (auto)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => (scanActive ? openScanner("rear") : openCameraTest("rear"))}
+                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    >
+                      Relancer (caméra arrière)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => (scanActive ? openScanner("front") : openCameraTest("front"))}
+                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    >
+                      Relancer (caméra avant)
+                    </button>
+                  </span>
+                  {scanActive ? (
+                    <span className="block text-xs text-neutral-500">
+                      Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+                    </span>
+                  ) : null}
+                  <span className="block text-xs text-neutral-500">
+                    iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
+                  </span>
+                </span>
+              </details>
             </div>
-          )}
-          <div className="flex flex-wrap gap-2 text-xs text-neutral-400">
-            {scanActive ? (
-              <button
-                type="button"
-                onClick={() => openCameraTest(cameraTestMode)}
-                className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-              >
-                Passer en test caméra
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => openScanner(cameraTestMode)}
-                className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
-              >
-                Activer le scan
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => (scanActive ? openScanner("auto") : openCameraTest("auto"))}
-              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-            >
-              Relancer (auto)
-            </button>
-            <button
-              type="button"
-              onClick={() => (scanActive ? openScanner("rear") : openCameraTest("rear"))}
-              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-            >
-              Relancer (caméra arrière)
-            </button>
-            <button
-              type="button"
-              onClick={() => (scanActive ? openScanner("front") : openCameraTest("front"))}
-              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-            >
-              Relancer (caméra avant)
-            </button>
-          </div>
-          {scanActive ? (
-            <div className="text-xs text-neutral-500">
-              Astuce: privilégiez un bon éclairage pour une détection plus rapide.
-            </div>
-          ) : null}
-          <div className="text-xs text-neutral-500">
-            iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
           </div>
         </div>
-      </Modal>
+      ) : null}
+
+      {!cameraTestOpen && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {records.map((r, i) => renderCard(r, i))}
+        </div>
+      )}
+      {!cameraTestOpen && !loading && datasetUsed && !records.length && !error ? (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
+          At this time the good is safe.
+        </div>
+      ) : null}
+
+      {cameraTestOpen && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {records.map((r, i) => renderCard(r, i))}
+          {!loading && datasetUsed && !records.length && !error ? renderSafeCard() : null}
+        </div>
+      )}
     </div>
   );
 }
