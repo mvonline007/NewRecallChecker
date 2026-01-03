@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.48";
+const APP_VERSION = "1.0.55";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -124,7 +124,7 @@ function buildFriendlyApiError(status, statusText, rawText) {
   const parsed = parseApiErrorPayload(rawText);
   const rawMessage = parsed?.message || parsed?.error || rawText || "";
   if (rawMessage.includes("Unknown field: gtin")) {
-    return "Le champ GTIN est introuvable dans ce dataset. Essayez “V2 (GTIN espacés)”.";
+    return "At this time the good is safe";
   }
   if (status === 400 && rawMessage.includes("ODSQL")) {
     return "La requête GTIN est invalide pour ce dataset. Essayez un autre dataset ou vérifiez le GTIN.";
@@ -347,25 +347,26 @@ function extractImageUrls(record) {
   return urls;
 }
 
-function GtinSearchPanel({ onOpenFiche }) {
-  const [mode, setMode] = useState("auto");
+function GtinSearchPanel({ onOpenFiche, mode }) {
   const [gtinRaw, setGtinRaw] = useState("");
-  const [limit, setLimit] = useState(50);
+  const limit = 50;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hits, setHits] = useState(0);
   const [datasetUsed, setDatasetUsed] = useState(null);
   const [records, setRecords] = useState([]);
   const [lastUrl, setLastUrl] = useState("");
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [scannerError, setScannerError] = useState("");
-  const [scannerMode, setScannerMode] = useState("auto");
+  const [cameraTestOpen, setCameraTestOpen] = useState(false);
+  const [cameraTestError, setCameraTestError] = useState("");
+  const [cameraTestMode, setCameraTestMode] = useState("rear");
+  const [scanActive, setScanActive] = useState(false);
   const abortRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectorRef = useRef(null);
   const zxingReaderRef = useRef(null);
   const rafRef = useRef(null);
+  const scanStartRef = useRef(0);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
@@ -411,17 +412,17 @@ function GtinSearchPanel({ onOpenFiche }) {
     }
     detectorRef.current = null;
     if (zxingReaderRef.current) {
-      zxingReaderRef.current.reset();
+      const reader = zxingReaderRef.current;
+      if (typeof reader.reset === "function") {
+        reader.reset();
+      } else if (typeof reader.stopContinuousDecode === "function") {
+        reader.stopContinuousDecode();
+      }
       zxingReaderRef.current = null;
     }
   }
 
-  function closeScanner() {
-    setScannerOpen(false);
-    stopScanner();
-  }
-
-  function buildScannerConstraints(mode) {
+  function buildCameraConstraints(mode) {
     if (mode === "rear") {
       return { video: { facingMode: { ideal: "environment" } } };
     }
@@ -441,8 +442,22 @@ function GtinSearchPanel({ onOpenFiche }) {
   }
 
   function openScanner(mode) {
-    setScannerMode(mode);
-    setScannerOpen(true);
+    stopScanner();
+    setCameraTestMode(mode);
+    setScanActive(true);
+    setCameraTestOpen(true);
+  }
+
+  function closeCameraTest() {
+    setCameraTestOpen(false);
+    setScanActive(false);
+    stopScanner();
+  }
+
+  function openCameraTest(mode) {
+    setCameraTestMode(mode);
+    setScanActive(false);
+    setCameraTestOpen(true);
   }
 
   async function runSearch(gtinsToSearch) {
@@ -498,6 +513,7 @@ function GtinSearchPanel({ onOpenFiche }) {
       if (String(e?.name) === "AbortError") return;
       setError(String(e?.message || e));
     } finally {
+      setGtinRaw("");
       setLoading(false);
     }
   }
@@ -507,29 +523,23 @@ function GtinSearchPanel({ onOpenFiche }) {
   }
 
   useEffect(() => {
-    if (!scannerOpen) {
+    if (!cameraTestOpen || !scanActive) {
       stopScanner();
       return undefined;
     }
-    setScannerError("");
+    setCameraTestError("");
 
     if (!navigator?.mediaDevices?.getUserMedia) {
-      setScannerError("Caméra non disponible sur cet appareil.");
-      return undefined;
-    }
-
-    if (!("BarcodeDetector" in window)) {
-      setScannerError(
-        "Le scanner n'est pas supporté par ce navigateur. Utilisez Chrome ou Edge récent."
-      );
+      setCameraTestError("Caméra non disponible sur cet appareil.");
       return undefined;
     }
 
     let active = true;
+    scanStartRef.current = Date.now();
 
     const startNativeDetector = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(buildScannerConstraints(scannerMode));
+        const stream = await navigator.mediaDevices.getUserMedia(buildCameraConstraints(cameraTestMode));
         if (!active) return;
         streamRef.current = stream;
         const video = videoRef.current;
@@ -548,20 +558,22 @@ function GtinSearchPanel({ onOpenFiche }) {
               const rawValue = barcodes[0]?.rawValue || "";
               const cleaned = String(rawValue).replace(/[^0-9]/g, "");
               if (cleaned) {
-                closeScanner();
+                closeCameraTest();
                 setGtinRaw(cleaned);
                 runSearch(normalizeGtinInput(cleaned));
                 return;
               }
             }
           } catch (err) {
-            setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+            if (Date.now() - scanStartRef.current > 1500) {
+              setCameraTestError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+            }
           }
           rafRef.current = requestAnimationFrame(tick);
         };
         rafRef.current = requestAnimationFrame(tick);
       } catch (err) {
-        setScannerError("Accès caméra refusé ou indisponible.");
+        setCameraTestError("Accès caméra refusé ou indisponible.");
       }
     };
 
@@ -570,24 +582,26 @@ function GtinSearchPanel({ onOpenFiche }) {
       try {
         const reader = new BrowserMultiFormatReader();
         zxingReaderRef.current = reader;
-        const constraints = buildScannerConstraints(scannerMode);
+        const constraints = buildCameraConstraints(cameraTestMode);
         reader.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
           if (!active) return;
           if (result?.getText) {
             const cleaned = String(result.getText()).replace(/[^0-9]/g, "");
             if (cleaned) {
-              closeScanner();
+              closeCameraTest();
               setGtinRaw(cleaned);
               runSearch(normalizeGtinInput(cleaned));
             }
             return;
           }
           if (err && err?.name !== "NotFoundException") {
-            setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+            if (Date.now() - scanStartRef.current > 1500) {
+              setCameraTestError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+            }
           }
         });
       } catch (err) {
-        setScannerError("Accès caméra refusé ou indisponible.");
+        setCameraTestError("Accès caméra refusé ou indisponible.");
       }
     };
 
@@ -601,7 +615,47 @@ function GtinSearchPanel({ onOpenFiche }) {
       active = false;
       stopScanner();
     };
-  }, [scannerOpen, scannerMode]);
+  }, [cameraTestOpen, scanActive, cameraTestMode]);
+
+  useEffect(() => {
+    if (!cameraTestOpen || scanActive) {
+      return undefined;
+    }
+    setCameraTestError("");
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraTestError("Caméra non disponible sur cet appareil.");
+      return undefined;
+    }
+
+    let active = true;
+
+    const startPreview = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(
+          buildCameraConstraints(cameraTestMode)
+        );
+        if (!active) return;
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          video.muted = true;
+          await video.play();
+        }
+      } catch (err) {
+        if (!active) return;
+        setCameraTestError("Accès caméra refusé ou indisponible.");
+      }
+    };
+
+    startPreview();
+
+    return () => {
+      active = false;
+      stopScanner();
+    };
+  }, [cameraTestOpen, scanActive, cameraTestMode]);
 
   useEffect(() => {
     try {
@@ -741,101 +795,39 @@ function GtinSearchPanel({ onOpenFiche }) {
         <div className="flex flex-col gap-4">
           <div className="space-y-1">
             <div className="text-lg font-semibold">Recherche GTIN</div>
-            <div className="text-xs text-neutral-400">
-              Source: {GTIN_DATASETS.trie.id} / {GTIN_DATASETS.espaces.id}
-            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
             <div className="md:col-span-6">
               <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
-              <input
-                value={gtinRaw}
-                onChange={(e) => setGtinRaw(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") search();
-                }}
-                placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
-                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-              />
-              <div className="mt-1 text-xs text-neutral-500">
-                Normalisé: {gtins.length ? gtins.join(", ") : "—"}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  value={gtinRaw}
+                  onChange={(e) => setGtinRaw(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") search();
+                  }}
+                  placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
+                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                />
                 <button
-                  type="button"
-                  onClick={() => openScanner("auto")}
-                  className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+                  onClick={search}
+                  disabled={loading}
+                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
                 >
-                  Scanner (auto)
+                  {loading ? "…" : "Search"}
                 </button>
                 <button
                   type="button"
                   onClick={() => openScanner("rear")}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
                 >
-                  Scanner (caméra arrière)
+                  Caméra
                 </button>
-                <button
-                  type="button"
-                  onClick={() => openScanner("front")}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Scanner (caméra avant)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openScanner("highres")}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Scanner (HD)
-                </button>
-                <span>Autorisez la caméra pour remplir automatiquement le GTIN.</span>
               </div>
             </div>
 
-            <div className="md:col-span-3">
-              <label className="text-xs text-neutral-400">Dataset</label>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
-              >
-                <option value="auto">Auto (trie → fallback espaces)</option>
-                <option value="trie">{GTIN_DATASETS.trie.label}</option>
-                <option value="espaces">{GTIN_DATASETS.espaces.label}</option>
-              </select>
-              <div className="mt-1 text-xs text-neutral-500">
-                {mode === "trie"
-                  ? GTIN_DATASETS.trie.hint
-                  : mode === "espaces"
-                  ? GTIN_DATASETS.espaces.hint
-                  : "Recherche exacte puis fallback"}
-              </div>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="text-xs text-neutral-400">Limit</label>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={limit}
-                onChange={(e) => setLimit(Math.max(1, Math.min(100, Number(e.target.value || 50))))}
-                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
-              />
-              <div className="mt-1 text-xs text-neutral-500">1–100</div>
-            </div>
-
-            <div className="md:col-span-1 flex items-end">
-              <button
-                onClick={search}
-                disabled={loading}
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
-              >
-                {loading ? "…" : "Search"}
-              </button>
-            </div>
+            <div className="md:col-span-6 text-xs text-neutral-500" />
           </div>
 
           {error ? (
@@ -845,16 +837,7 @@ function GtinSearchPanel({ onOpenFiche }) {
           ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-300">
-            <div>
-              {datasetUsed ? (
-                <>
-                  Dataset: <span className="font-medium">{GTIN_DATASETS[datasetUsed].id}</span> •
-                  Résultats: <span className="font-medium">{hits}</span>
-                </>
-              ) : (
-                <>Prêt</>
-              )}
-            </div>
+            <div />
             {lastUrl ? (
               <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
                 Ouvrir requête JSON
@@ -870,26 +853,23 @@ function GtinSearchPanel({ onOpenFiche }) {
 
       {!loading && datasetUsed && !records.length && !error ? (
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
-          Aucun résultat.
-          <div className="mt-2 text-neutral-500">
-            Tips: vérifier le GTIN (13 chiffres), ou passer sur “V2 (GTIN espacés)”.
-          </div>
+          At this time the good is safe.
         </div>
       ) : null}
 
-      <div className="text-xs text-neutral-500">
-        Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
-      </div>
-
-      <Modal open={scannerOpen} onClose={closeScanner} title="Scanner un code-barres">
+      <Modal
+        open={cameraTestOpen}
+        onClose={closeCameraTest}
+        title={scanActive ? "Scanner un code-barres" : "Tester la caméra"}
+      >
         <div className="space-y-3">
           <div className="text-xs text-neutral-400">
             Mode actuel:{" "}
-            {scannerMode === "rear"
+            {cameraTestMode === "rear"
               ? "caméra arrière"
-              : scannerMode === "front"
+              : cameraTestMode === "front"
               ? "caméra avant"
-              : scannerMode === "highres"
+              : cameraTestMode === "highres"
               ? "HD"
               : "auto"}
           </div>
@@ -898,21 +878,66 @@ function GtinSearchPanel({ onOpenFiche }) {
               ref={videoRef}
               className="h-[320px] w-full object-cover"
               muted
+              autoPlay
               playsInline
             />
           </div>
-          {scannerError ? (
+          {cameraTestError ? (
             <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {scannerError}
+              {cameraTestError}
             </div>
           ) : (
             <div className="text-sm text-neutral-300">
-              Placez le code-barres dans le cadre pour le détecter automatiquement.
+              {scanActive
+                ? "Placez le code-barres dans le cadre pour le détecter automatiquement."
+                : "Prévisualisez la caméra pour valider l'accès et la mise au point."}
             </div>
           )}
-          <div className="text-xs text-neutral-500">
-            Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+          <div className="flex flex-wrap gap-2 text-xs text-neutral-400">
+            {scanActive ? (
+              <button
+                type="button"
+                onClick={() => openCameraTest(cameraTestMode)}
+                className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+              >
+                Passer en test caméra
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => openScanner(cameraTestMode)}
+                className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+              >
+                Activer le scan
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => (scanActive ? openScanner("auto") : openCameraTest("auto"))}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+            >
+              Relancer (auto)
+            </button>
+            <button
+              type="button"
+              onClick={() => (scanActive ? openScanner("rear") : openCameraTest("rear"))}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+            >
+              Relancer (caméra arrière)
+            </button>
+            <button
+              type="button"
+              onClick={() => (scanActive ? openScanner("front") : openCameraTest("front"))}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+            >
+              Relancer (caméra avant)
+            </button>
           </div>
+          {scanActive ? (
+            <div className="text-xs text-neutral-500">
+              Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+            </div>
+          ) : null}
           <div className="text-xs text-neutral-500">
             iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
           </div>
@@ -1040,6 +1065,7 @@ export default function RappelConsoRssViewer() {
 
   const [activeTab, setActiveTab] = useState("rss");
   const [mode, setMode] = useState("gallery");
+  const [gtinDatasetMode, setGtinDatasetMode] = useState("auto");
   const [q, setQ] = useState("");
   const [onlyWithImages, setOnlyWithImages] = useState(false);
   const [fromDate, setFromDate] = useState("");
@@ -1354,6 +1380,17 @@ export default function RappelConsoRssViewer() {
                 onClick={() => setActiveTab("gtin")}
               >
                 GTIN search
+              </button>
+              <button
+                className={classNames(
+                  "rounded-xl border px-3 py-2 text-sm",
+                  activeTab === "config"
+                    ? "border-neutral-200 bg-neutral-100 text-neutral-950"
+                    : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                )}
+                onClick={() => setActiveTab("config")}
+              >
+                Config
               </button>
             </div>
 
@@ -1708,7 +1745,38 @@ export default function RappelConsoRssViewer() {
                 setFicheUrl(url);
                 setFicheOpen(true);
               }
-            }} />
+            }} mode={gtinDatasetMode} />
+          </div>
+        )}
+        {activeTab === "config" && (
+          <div className="mt-6 space-y-4">
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+              <div className="space-y-3">
+                <div className="text-lg font-semibold">GTIN search</div>
+                <div className="md:max-w-md">
+                  <label className="text-xs text-neutral-400">Dataset</label>
+                  <select
+                    value={gtinDatasetMode}
+                    onChange={(e) => setGtinDatasetMode(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+                  >
+                    <option value="auto">Auto (trie → fallback espaces)</option>
+                    <option value="trie">{GTIN_DATASETS.trie.label}</option>
+                    <option value="espaces">{GTIN_DATASETS.espaces.label}</option>
+                  </select>
+                  <div className="mt-1 text-xs text-neutral-500">
+                    {gtinDatasetMode === "trie"
+                      ? GTIN_DATASETS.trie.hint
+                      : gtinDatasetMode === "espaces"
+                      ? GTIN_DATASETS.espaces.hint
+                      : "Recherche exacte puis fallback"}
+                  </div>
+                </div>
+                <div className="text-xs text-neutral-500">
+                  Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
