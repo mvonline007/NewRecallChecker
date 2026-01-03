@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.68";
+const APP_VERSION = "1.0.69";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
@@ -336,7 +336,7 @@ function ImageWithFallback({ src, alt }) {
     <img
       src={src}
       alt={alt}
-      className="h-full w-full object-cover"
+      className="h-full w-full bg-neutral-950 object-contain"
       loading="lazy"
       onError={() => setBad(true)}
     />
