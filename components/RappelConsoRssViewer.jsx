@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 import {
   BarChart,
   Bar,
@@ -14,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.43";
+const APP_VERSION = "1.0.48";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -108,6 +109,28 @@ function buildWhereExactGtins(fieldName, gtins) {
 
 function buildWhereContainsGtin(fieldName, gtin) {
   return `${fieldName} like \"%${gtin}%\"`;
+}
+
+function parseApiErrorPayload(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {}
+  return null;
+}
+
+function buildFriendlyApiError(status, statusText, rawText) {
+  const parsed = parseApiErrorPayload(rawText);
+  const rawMessage = parsed?.message || parsed?.error || rawText || "";
+  if (rawMessage.includes("Unknown field: gtin")) {
+    return "Le champ GTIN est introuvable dans ce dataset. Essayez “V2 (GTIN espacés)”.";
+  }
+  if (status === 400 && rawMessage.includes("ODSQL")) {
+    return "La requête GTIN est invalide pour ce dataset. Essayez un autre dataset ou vérifiez le GTIN.";
+  }
+  const tail = rawMessage ? ` — ${rawMessage.slice(0, 200)}` : "";
+  return `HTTP ${status} ${statusText}${tail}`;
 }
 
 function getFirst(obj, keys) {
@@ -334,7 +357,15 @@ function GtinSearchPanel({ onOpenFiche }) {
   const [datasetUsed, setDatasetUsed] = useState(null);
   const [records, setRecords] = useState([]);
   const [lastUrl, setLastUrl] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerError, setScannerError] = useState("");
+  const [scannerMode, setScannerMode] = useState("auto");
   const abortRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const detectorRef = useRef(null);
+  const zxingReaderRef = useRef(null);
+  const rafRef = useRef(null);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
@@ -357,9 +388,7 @@ function GtinSearchPanel({ onOpenFiche }) {
 
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      throw new Error(
-        `HTTP ${res.status} ${res.statusText}${txt ? ` — ${txt.slice(0, 200)}` : ""}`
-      );
+      throw new Error(buildFriendlyApiError(res.status, res.statusText, txt));
     }
 
     const data = await res.json();
@@ -368,13 +397,62 @@ function GtinSearchPanel({ onOpenFiche }) {
     return { total, results };
   }
 
-  async function search() {
+  function stopScanner() {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    detectorRef.current = null;
+    if (zxingReaderRef.current) {
+      zxingReaderRef.current.reset();
+      zxingReaderRef.current = null;
+    }
+  }
+
+  function closeScanner() {
+    setScannerOpen(false);
+    stopScanner();
+  }
+
+  function buildScannerConstraints(mode) {
+    if (mode === "rear") {
+      return { video: { facingMode: { ideal: "environment" } } };
+    }
+    if (mode === "front") {
+      return { video: { facingMode: { ideal: "user" } } };
+    }
+    if (mode === "highres") {
+      return {
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+    }
+    return { video: true };
+  }
+
+  function openScanner(mode) {
+    setScannerMode(mode);
+    setScannerOpen(true);
+  }
+
+  async function runSearch(gtinsToSearch) {
+    const inputGtins = gtinsToSearch ?? gtins;
     setError("");
     setRecords([]);
     setHits(0);
     setDatasetUsed(null);
 
-    if (!gtins.length) {
+    if (!inputGtins.length) {
       setError("GTIN requis (ex: 3250391234567)");
       return;
     }
@@ -383,20 +461,22 @@ function GtinSearchPanel({ onOpenFiche }) {
 
     try {
       const tryTrie = async () => {
-        const where = buildWhereExactGtins("gtin", gtins);
+        const where = buildWhereExactGtins("gtin", inputGtins);
         const out = await fetchRecords(GTIN_DATASETS.trie.id, where);
         setDatasetUsed("trie");
         return out;
       };
 
       const tryEspaces = async () => {
-        if (gtins.length === 1) {
-          const where = buildWhereContainsGtin("gtin", gtins[0]);
+        if (inputGtins.length === 1) {
+          const where = buildWhereContainsGtin("gtin", inputGtins[0]);
           const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
           setDatasetUsed("espaces");
           return out;
         }
-        const where = `(${gtins.map((g) => buildWhereContainsGtin("gtin", g)).join(" OR ")})`;
+        const where = `(${inputGtins
+          .map((g) => buildWhereContainsGtin("gtin", g))
+          .join(" OR ")})`;
         const out = await fetchRecords(GTIN_DATASETS.espaces.id, where);
         setDatasetUsed("espaces");
         return out;
@@ -421,6 +501,107 @@ function GtinSearchPanel({ onOpenFiche }) {
       setLoading(false);
     }
   }
+
+  async function search() {
+    await runSearch();
+  }
+
+  useEffect(() => {
+    if (!scannerOpen) {
+      stopScanner();
+      return undefined;
+    }
+    setScannerError("");
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setScannerError("Caméra non disponible sur cet appareil.");
+      return undefined;
+    }
+
+    if (!("BarcodeDetector" in window)) {
+      setScannerError(
+        "Le scanner n'est pas supporté par ce navigateur. Utilisez Chrome ou Edge récent."
+      );
+      return undefined;
+    }
+
+    let active = true;
+
+    const startNativeDetector = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(buildScannerConstraints(scannerMode));
+        if (!active) return;
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          await video.play();
+        }
+        detectorRef.current = new window.BarcodeDetector({
+          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"]
+        });
+        const tick = async () => {
+          if (!active || !videoRef.current || !detectorRef.current) return;
+          try {
+            const barcodes = await detectorRef.current.detect(videoRef.current);
+            if (barcodes?.length) {
+              const rawValue = barcodes[0]?.rawValue || "";
+              const cleaned = String(rawValue).replace(/[^0-9]/g, "");
+              if (cleaned) {
+                closeScanner();
+                setGtinRaw(cleaned);
+                runSearch(normalizeGtinInput(cleaned));
+                return;
+              }
+            }
+          } catch (err) {
+            setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+          }
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+      } catch (err) {
+        setScannerError("Accès caméra refusé ou indisponible.");
+      }
+    };
+
+    const startZxing = async () => {
+      if (!videoRef.current) return;
+      try {
+        const reader = new BrowserMultiFormatReader();
+        zxingReaderRef.current = reader;
+        const constraints = buildScannerConstraints(scannerMode);
+        reader.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
+          if (!active) return;
+          if (result?.getText) {
+            const cleaned = String(result.getText()).replace(/[^0-9]/g, "");
+            if (cleaned) {
+              closeScanner();
+              setGtinRaw(cleaned);
+              runSearch(normalizeGtinInput(cleaned));
+            }
+            return;
+          }
+          if (err && err?.name !== "NotFoundException") {
+            setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+          }
+        });
+      } catch (err) {
+        setScannerError("Accès caméra refusé ou indisponible.");
+      }
+    };
+
+    if ("BarcodeDetector" in window) {
+      startNativeDetector();
+    } else {
+      startZxing();
+    }
+
+    return () => {
+      active = false;
+      stopScanner();
+    };
+  }, [scannerOpen, scannerMode]);
 
   useEffect(() => {
     try {
@@ -580,6 +761,37 @@ function GtinSearchPanel({ onOpenFiche }) {
               <div className="mt-1 text-xs text-neutral-500">
                 Normalisé: {gtins.length ? gtins.join(", ") : "—"}
               </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+                <button
+                  type="button"
+                  onClick={() => openScanner("auto")}
+                  className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+                >
+                  Scanner (auto)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openScanner("rear")}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                >
+                  Scanner (caméra arrière)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openScanner("front")}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                >
+                  Scanner (caméra avant)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openScanner("highres")}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                >
+                  Scanner (HD)
+                </button>
+                <span>Autorisez la caméra pour remplir automatiquement le GTIN.</span>
+              </div>
             </div>
 
             <div className="md:col-span-3">
@@ -668,6 +880,44 @@ function GtinSearchPanel({ onOpenFiche }) {
       <div className="text-xs text-neutral-500">
         Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
       </div>
+
+      <Modal open={scannerOpen} onClose={closeScanner} title="Scanner un code-barres">
+        <div className="space-y-3">
+          <div className="text-xs text-neutral-400">
+            Mode actuel:{" "}
+            {scannerMode === "rear"
+              ? "caméra arrière"
+              : scannerMode === "front"
+              ? "caméra avant"
+              : scannerMode === "highres"
+              ? "HD"
+              : "auto"}
+          </div>
+          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
+            <video
+              ref={videoRef}
+              className="h-[320px] w-full object-cover"
+              muted
+              playsInline
+            />
+          </div>
+          {scannerError ? (
+            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              {scannerError}
+            </div>
+          ) : (
+            <div className="text-sm text-neutral-300">
+              Placez le code-barres dans le cadre pour le détecter automatiquement.
+            </div>
+          )}
+          <div className="text-xs text-neutral-500">
+            Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+          </div>
+          <div className="text-xs text-neutral-500">
+            iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 {
   "name": "rappelconso-vercel",
   "private": true,
-  "version": "1.0.43",
+  "version": "1.0.48",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.5",
+    "@zxing/browser": "^0.1.4",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
