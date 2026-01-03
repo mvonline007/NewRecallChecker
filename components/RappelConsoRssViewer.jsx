@@ -6,7 +6,8 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.70";
+const APP_VERSION = "1.0.71";
+const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
@@ -1254,6 +1255,11 @@ export default function RappelConsoRssViewer() {
 
     refresh();
 
+    const savedDistributeurs = readJsonLS(LS_SELECTED_DISTRIBUTEURS, []);
+    if (Array.isArray(savedDistributeurs)) {
+      setSelectedDistributeurs(savedDistributeurs);
+    }
+
     return () => {
       abortRef.current?.abort?.();
       detailsAbortRef.current?.abort?.();
@@ -1323,6 +1329,10 @@ export default function RappelConsoRssViewer() {
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
+
+  useEffect(() => {
+    writeJsonLS(LS_SELECTED_DISTRIBUTEURS, selectedDistributeurs);
+  }, [selectedDistributeurs]);
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
   const previewUrl = useMemo(() => {
@@ -1446,54 +1456,6 @@ export default function RappelConsoRssViewer() {
                 >
                   {loading ? "Refreshing…" : "Refresh"}
                 </button>
-
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
-                  <label className="text-xs text-neutral-400" htmlFor="cron-secret">
-                    Cron secret
-                  </label>
-                  <input
-                    id="cron-secret"
-                    type="password"
-                    className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
-                    placeholder="Optional"
-                    value={cronSecret}
-                    onChange={(event) => setCronSecret(event.target.value)}
-                  />
-                  <button
-                    className={classNames(
-                      "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
-                      testEmailSending && "opacity-60"
-                    )}
-                    onClick={sendTestEmail}
-                    disabled={testEmailSending}
-                  >
-                    {testEmailSending ? "Sending…" : "Send test email"}
-                  </button>
-                  <button
-                    className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                    onClick={() => {
-                      setPreviewKey((val) => val + 1);
-                      setPreviewOpen(true);
-                    }}
-                    type="button"
-                  >
-                    Preview email
-                  </button>
-                  {testEmailStatus && (
-                    <span className="flex flex-col text-xs">
-                      <span
-                        className={classNames(
-                          testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
-                        )}
-                      >
-                        {testEmailStatus.message}
-                      </span>
-                      {testEmailStatus.details && (
-                        <span className="text-neutral-400">{testEmailStatus.details}</span>
-                      )}
-                    </span>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -1662,6 +1624,58 @@ export default function RappelConsoRssViewer() {
                 </div>
                 <div className="text-xs text-neutral-500">
                   Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+              <div className="space-y-3">
+                <div className="text-lg font-semibold">Email tests</div>
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
+                  <label className="text-xs text-neutral-400" htmlFor="cron-secret">
+                    Cron secret
+                  </label>
+                  <input
+                    id="cron-secret"
+                    type="password"
+                    className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+                    placeholder="Optional"
+                    value={cronSecret}
+                    onChange={(event) => setCronSecret(event.target.value)}
+                  />
+                  <button
+                    className={classNames(
+                      "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
+                      testEmailSending && "opacity-60"
+                    )}
+                    onClick={sendTestEmail}
+                    disabled={testEmailSending}
+                  >
+                    {testEmailSending ? "Sending…" : "Send test email"}
+                  </button>
+                  <button
+                    className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    onClick={() => {
+                      setPreviewKey((val) => val + 1);
+                      setPreviewOpen(true);
+                    }}
+                    type="button"
+                  >
+                    Preview email
+                  </button>
+                  {testEmailStatus && (
+                    <span className="flex flex-col text-xs">
+                      <span
+                        className={classNames(
+                          testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
+                        )}
+                      >
+                        {testEmailStatus.message}
+                      </span>
+                      {testEmailStatus.details && (
+                        <span className="text-neutral-400">{testEmailStatus.details}</span>
+                      )}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
