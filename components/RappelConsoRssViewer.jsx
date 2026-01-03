@@ -6,8 +6,9 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.75";
+const APP_VERSION = "1.0.77";
 const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
+const LS_GTIN_CAMERA_HIDE_MS = "rappelconso_gtin_camera_hide_ms_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
@@ -337,7 +338,7 @@ function extractImageUrls(record) {
   return urls;
 }
 
-function GtinSearchPanel({ onOpenFiche, mode }) {
+function GtinSearchPanel({ onOpenFiche, mode, cameraResultHideMs = 1000, autoStartCamera = false }) {
   const [gtinRaw, setGtinRaw] = useState("");
   const limit = 50;
   const [loading, setLoading] = useState(false);
@@ -817,6 +818,27 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
 
   const showSafeCard = safeResult || (!loading && datasetUsed && !records.length && !error);
 
+  useEffect(() => {
+    if (!cameraTestOpen || !scanActive) return undefined;
+    if (!cameraResultHideMs || cameraResultHideMs <= 0) return undefined;
+    if (!records.length && !showSafeCard) return undefined;
+    const t = setTimeout(() => {
+      setRecords([]);
+      setSafeResult(false);
+      setHits(0);
+      setDatasetUsed(null);
+      setError("");
+    }, cameraResultHideMs);
+    return () => clearTimeout(t);
+  }, [cameraTestOpen, scanActive, cameraResultHideMs, records.length, showSafeCard]);
+
+  useEffect(() => {
+    if (!autoStartCamera) return;
+    if (cameraTestOpen) return;
+    openScanner("rear");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartCamera]);
+
   return (
     <div className="space-y-4">
       {!cameraTestOpen ? (
@@ -1117,6 +1139,7 @@ export default function RappelConsoRssViewer() {
 
   const [activeTab, setActiveTab] = useState("rss");
   const [gtinDatasetMode, setGtinDatasetMode] = useState("auto");
+  const [cameraResultHideMs, setCameraResultHideMs] = useState(1000);
   const [q, setQ] = useState("");
   const [selectedDistributeurs, setSelectedDistributeurs] = useState([]);
 
@@ -1240,6 +1263,10 @@ export default function RappelConsoRssViewer() {
     if (Array.isArray(savedDistributeurs)) {
       setSelectedDistributeurs(savedDistributeurs);
     }
+    const savedCameraHide = readJsonLS(LS_GTIN_CAMERA_HIDE_MS, 1000);
+    if (Number.isFinite(savedCameraHide) && savedCameraHide >= 0) {
+      setCameraResultHideMs(savedCameraHide);
+    }
 
     return () => {
       abortRef.current?.abort?.();
@@ -1314,6 +1341,10 @@ export default function RappelConsoRssViewer() {
   useEffect(() => {
     writeJsonLS(LS_SELECTED_DISTRIBUTEURS, selectedDistributeurs);
   }, [selectedDistributeurs]);
+
+  useEffect(() => {
+    writeJsonLS(LS_GTIN_CAMERA_HIDE_MS, cameraResultHideMs);
+  }, [cameraResultHideMs]);
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
 
@@ -1532,7 +1563,7 @@ export default function RappelConsoRssViewer() {
                 setFicheUrl(url);
                 setFicheOpen(true);
               }
-            }} mode={gtinDatasetMode} />
+            }} mode={gtinDatasetMode} cameraResultHideMs={cameraResultHideMs} autoStartCamera />
           </div>
         )}
         {activeTab === "config" && (
@@ -1557,6 +1588,29 @@ export default function RappelConsoRssViewer() {
                       : gtinDatasetMode === "espaces"
                       ? GTIN_DATASETS.espaces.hint
                       : "Recherche exacte puis fallback"}
+                  </div>
+                </div>
+                <div className="md:max-w-md">
+                  <label className="text-xs text-neutral-400">Camera result hide delay (seconds)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={cameraResultHideMs / 1000}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === "") {
+                        setCameraResultHideMs(0);
+                        return;
+                      }
+                      const parsed = Number(next);
+                      if (!Number.isFinite(parsed)) return;
+                      setCameraResultHideMs(Math.max(0, Math.round(parsed * 1000)));
+                    }}
+                    className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+                  />
+                  <div className="mt-1 text-xs text-neutral-500">
+                    Masque les résultats après un scan (par défaut: 1s).
                   </div>
                 </div>
                 <div className="text-xs text-neutral-500">
