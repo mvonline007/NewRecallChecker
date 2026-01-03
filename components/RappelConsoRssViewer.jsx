@@ -15,8 +15,9 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.66";
+const APP_VERSION = "1.0.69";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
+const SAFE_MESSAGE = "At this time the good is safe.";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -125,7 +126,10 @@ function buildFriendlyApiError(status, statusText, rawText) {
   const parsed = parseApiErrorPayload(rawText);
   const rawMessage = parsed?.message || parsed?.error || rawText || "";
   if (rawMessage.includes("Unknown field: gtin")) {
-    return "At this time the good is safe";
+    return SAFE_MESSAGE;
+  }
+  if (String(rawMessage).toLowerCase().includes("good is safe")) {
+    return SAFE_MESSAGE;
   }
   if (status === 400 && rawMessage.includes("ODSQL")) {
     return "La requête GTIN est invalide pour ce dataset. Essayez un autre dataset ou vérifiez le GTIN.";
@@ -159,6 +163,13 @@ function toArray(v) {
     return parts.length ? parts : [v];
   }
   return [v];
+}
+
+function isSafeMessage(message) {
+  if (!message) return false;
+  const normalized = String(message).trim().toLowerCase();
+  const needle = SAFE_MESSAGE.replace(/\.$/, "").toLowerCase();
+  return normalized.includes(needle);
 }
 
 function prettyDate(v) {
@@ -325,7 +336,7 @@ function ImageWithFallback({ src, alt }) {
     <img
       src={src}
       alt={alt}
-      className="h-full w-full object-cover"
+      className="h-full w-full bg-neutral-950 object-contain"
       loading="lazy"
       onError={() => setBad(true)}
     />
@@ -357,6 +368,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
   const [datasetUsed, setDatasetUsed] = useState(null);
   const [records, setRecords] = useState([]);
   const [lastUrl, setLastUrl] = useState("");
+  const [safeResult, setSafeResult] = useState(false);
   const [cameraTestOpen, setCameraTestOpen] = useState(false);
   const [cameraTestError, setCameraTestError] = useState("");
   const [cameraTestMode, setCameraTestMode] = useState("rear");
@@ -468,6 +480,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     const { limitOverride, clearInput = true } = options;
     const inputGtins = gtinsToSearch ?? gtins;
     setError("");
+    setSafeResult(false);
     setRecords([]);
     setHits(0);
     setDatasetUsed(null);
@@ -516,7 +529,13 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       setRecords(limitOverride === 1 ? out.results.slice(0, 1) : out.results);
     } catch (e) {
       if (String(e?.name) === "AbortError") return;
-      setError(String(e?.message || e));
+      const message = String(e?.message || e);
+      if (isSafeMessage(message)) {
+        setSafeResult(true);
+        setError("");
+        return;
+      }
+      setError(message);
     } finally {
       if (clearInput) {
         setGtinRaw("");
@@ -814,9 +833,11 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       enclosureUrl: SAFE_BADGE_SRC,
       pubDate: "",
       link: "",
-      descriptionText: "At this time the good is safe.",
+      descriptionText: SAFE_MESSAGE,
       distLabel: ""
     });
+
+  const showSafeCard = safeResult || (!loading && datasetUsed && !records.length && !error);
 
   return (
     <div className="space-y-4">
@@ -986,18 +1007,14 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       {!cameraTestOpen && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {records.map((r, i) => renderCard(r, i))}
+          {showSafeCard ? renderSafeCard() : null}
         </div>
       )}
-      {!cameraTestOpen && !loading && datasetUsed && !records.length && !error ? (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
-          At this time the good is safe.
-        </div>
-      ) : null}
 
       {cameraTestOpen && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {records.map((r, i) => renderCard(r, i))}
-          {!loading && datasetUsed && !records.length && !error ? renderSafeCard() : null}
+          {showSafeCard ? renderSafeCard() : null}
         </div>
       )}
     </div>
