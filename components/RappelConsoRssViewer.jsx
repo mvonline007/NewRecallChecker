@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.53";
+const APP_VERSION = "1.0.54";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -358,7 +358,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
   const [lastUrl, setLastUrl] = useState("");
   const [cameraTestOpen, setCameraTestOpen] = useState(false);
   const [cameraTestError, setCameraTestError] = useState("");
-  const [cameraTestMode, setCameraTestMode] = useState("auto");
+  const [cameraTestMode, setCameraTestMode] = useState("rear");
   const [scanActive, setScanActive] = useState(false);
   const abortRef = useRef(null);
   const videoRef = useRef(null);
@@ -512,6 +512,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       if (String(e?.name) === "AbortError") return;
       setError(String(e?.message || e));
     } finally {
+      setGtinRaw("");
       setLoading(false);
     }
   }
@@ -812,20 +813,15 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openScanner("auto")}
+                  onClick={() => openScanner("rear")}
                   className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
                 >
                   Caméra
                 </button>
               </div>
-              <div className="mt-1 text-xs text-neutral-500">
-                Normalisé: {gtins.length ? gtins.join(", ") : "—"}
-              </div>
             </div>
 
-            <div className="md:col-span-6 text-xs text-neutral-500">
-              Sélectionnez un dataset dans l’onglet Config.
-            </div>
+            <div className="md:col-span-6 text-xs text-neutral-500" />
           </div>
 
           {error ? (
@@ -835,14 +831,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
           ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-300">
-            <div>
-              {datasetUsed ? (
-                <>
-                  Dataset: <span className="font-medium">{GTIN_DATASETS[datasetUsed].id}</span> •
-                  Résultats: <span className="font-medium">{hits}</span>
-                </>
-              ) : null}
-            </div>
+            <div />
             {lastUrl ? (
               <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
                 Ouvrir requête JSON
