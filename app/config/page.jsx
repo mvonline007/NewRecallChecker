@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-export const VERSION = "1.0.74";
+export const VERSION = "1.0.75";
 
 const emptyStatus = { type: "", message: "" };
 const CRON_SCHEDULE = "0 6 * * *";
@@ -15,7 +15,7 @@ function formatRecipients(list) {
 function formatRecipientConfig(entry) {
   if (!entry?.email) return "";
   const distributeurs = Array.isArray(entry.distributeurs) ? entry.distributeurs : [];
-  const modeSuffix = entry.onlyNewItems ? " · new only (fallback latest 10)" : "";
+  const modeSuffix = entry.onlyNewItems ? " · new only" : " · latest 10 + new first";
   if (!distributeurs.length) return `${entry.email} (all distributeurs)${modeSuffix}`;
   return `${entry.email} (${distributeurs.join(", ")})${modeSuffix}`;
 }
@@ -341,8 +341,13 @@ export default function ConfigPage() {
                           setRecipientConfigs(next);
                         }}
                       />
-                      Only new items (if none, send latest 10)
+                      Only new items
                     </label>
+                    {!entry.onlyNewItems && (
+                      <div className="text-xs text-neutral-500">
+                        Default: latest 10 items plus any new items (new first).
+                      </div>
+                    )}
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <button
                         type="button"

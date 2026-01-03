@@ -13,7 +13,7 @@ import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.74";
+export const VERSION = "1.0.75";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -46,38 +46,6 @@ function hashItem(item) {
 
 function buildHashMap(items) {
   return new Map(items.map((item) => [item.id, hashItem(item)]));
-}
-
-function buildEmailContent({ newItems, changedItems, removedItems }) {
-  const totalChanges = newItems.length + changedItems.length + removedItems.length;
-  const subject = `RappelConso updates: ${totalChanges} change${totalChanges === 1 ? "" : "s"}`;
-
-  const formatList = (items) =>
-    items.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
-
-  const text = [
-    `New items (${newItems.length}):`,
-    formatList(newItems) || "- none",
-    "",
-    `Changed items (${changedItems.length}):`,
-    formatList(changedItems) || "- none",
-    "",
-    `Removed items (${removedItems.length}):`,
-    formatList(removedItems) || "- none"
-  ].join("\n");
-
-  const html = buildEmailHtml({
-    title: "RappelConso updates",
-    intro: "Latest changes detected in the RappelConso RSS feed.",
-    sections: [
-      { title: "New items", items: newItems },
-      { title: "Changed items", items: changedItems },
-      { title: "Removed items", items: removedItems }
-    ],
-    footer: "View the full feed in the RappelConso RSS dashboard."
-  });
-
-  return { subject, text, html };
 }
 
 function buildNewItemsEmailContent(items) {
@@ -113,6 +81,19 @@ function buildLatestItemsEmailContent(items, intro) {
     footer: "View the full feed in the RappelConso RSS dashboard."
   });
   return { subject, text, html };
+}
+
+function buildCombinedLatestItems({ newItems, latestItems }) {
+  const seen = new Set();
+  const merged = [];
+  const pushUnique = (item) => {
+    if (!item?.id || seen.has(item.id)) return;
+    seen.add(item.id);
+    merged.push(item);
+  };
+  newItems.forEach(pushUnique);
+  latestItems.forEach(pushUnique);
+  return merged;
 }
 
 async function buildEmailErrorDetails(error) {
@@ -202,10 +183,9 @@ export async function GET(req) {
 
     let emailMessageId = null;
     let emailMode = "none";
-    const hasDiff = newItems.length || changedItems.length || removedItems.length;
     const desiredEmailMode = normalizeEmailMode(CRON_EMAIL_MODE);
     const shouldSendLatest10 = desiredEmailMode === "latest10" || !latestSnapshot;
-    const shouldSendDiff = desiredEmailMode === "diff" || desiredEmailMode === "auto";
+    const latestItems = currentItems.slice(0, 10);
     const recipientConfigs = await getEmailRecipientConfigs();
     const hasRecipientOnlyNew = recipientConfigs.some((entry) => entry.onlyNewItems);
     if (recipientConfigs.length === 0) {
@@ -220,12 +200,10 @@ export async function GET(req) {
       );
     }
 
-    if ((shouldSendLatest10 && currentItems.length) || (shouldSendDiff && latestSnapshot && hasDiff) || hasRecipientOnlyNew) {
-      const latestItems = currentItems.slice(0, 10);
+    if ((shouldSendLatest10 && currentItems.length) || hasRecipientOnlyNew) {
       let enrichedLatest = null;
       let enrichedNew = null;
-      let enrichedChanged = null;
-      let enrichedRemoved = null;
+      let enrichedCombined = null;
       const getEnrichedLatest = async () => {
         if (!enrichedLatest) {
           enrichedLatest = await enrichItemsWithDistributeurs(latestItems);
@@ -238,17 +216,15 @@ export async function GET(req) {
         }
         return enrichedNew;
       };
-      const getEnrichedChanged = async () => {
-        if (!enrichedChanged) {
-          enrichedChanged = await enrichItemsWithDistributeurs(changedItems);
+      const getEnrichedCombined = async () => {
+        if (!enrichedCombined) {
+          const combined = buildCombinedLatestItems({
+            newItems,
+            latestItems
+          });
+          enrichedCombined = await enrichItemsWithDistributeurs(combined);
         }
-        return enrichedChanged;
-      };
-      const getEnrichedRemoved = async () => {
-        if (!enrichedRemoved) {
-          enrichedRemoved = await enrichItemsWithDistributeurs(removedItems);
-        }
-        return enrichedRemoved;
+        return enrichedCombined;
       };
       try {
         const emailMessages = await sendFilteredEmails({
@@ -262,56 +238,24 @@ export async function GET(req) {
               if (filteredNew.length) {
                 return buildNewItemsEmailContent(filteredNew);
               }
-              const filteredLatest = filterItemsByDistributeurs(
-                await getEnrichedLatest(),
-                recipient.distributeurs
-              );
-              if (!filteredLatest.length) return null;
-              return buildLatestItemsEmailContent(
-                filteredLatest,
-                "No new items detected; sending the latest 10 items instead."
-              );
+              return null;
             }
-            if (shouldSendLatest10 && currentItems.length) {
-              const filteredLatest = filterItemsByDistributeurs(
-                await getEnrichedLatest(),
-                recipient.distributeurs
-              );
-              if (!filteredLatest.length) return null;
-              return buildLatestItemsEmailContent(filteredLatest);
-            }
-            if (shouldSendDiff && latestSnapshot && hasDiff) {
-              const filteredNew = filterItemsByDistributeurs(
-                await getEnrichedNew(),
-                recipient.distributeurs
-              );
-              const filteredChanged = filterItemsByDistributeurs(
-                await getEnrichedChanged(),
-                recipient.distributeurs
-              );
-              const filteredRemoved = filterItemsByDistributeurs(
-                await getEnrichedRemoved(),
-                recipient.distributeurs
-              );
-              if (!filteredNew.length && !filteredChanged.length && !filteredRemoved.length) {
-                return null;
-              }
-              return buildEmailContent({
-                newItems: filteredNew,
-                changedItems: filteredChanged,
-                removedItems: filteredRemoved
-              });
-            }
-            return null;
+            const filteredCombined = filterItemsByDistributeurs(
+              await getEnrichedCombined(),
+              recipient.distributeurs
+            );
+            if (!filteredCombined.length) return null;
+            return buildLatestItemsEmailContent(
+              filteredCombined,
+              "Latest 10 items, plus any new items (new first)."
+            );
           }
         });
         emailMessageId = emailMessages[0]?.messageId || null;
         if (emailMessages.length) {
           emailMode = hasRecipientOnlyNew
             ? "recipient-config"
-            : shouldSendLatest10 && currentItems.length
-            ? "test"
-            : "diff";
+            : "latest-with-new";
         }
       } catch (error) {
         return Response.json(
