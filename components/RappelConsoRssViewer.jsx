@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.48";
+const APP_VERSION = "1.0.49";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -360,12 +360,17 @@ function GtinSearchPanel({ onOpenFiche }) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
   const [scannerMode, setScannerMode] = useState("auto");
+  const [cameraTestOpen, setCameraTestOpen] = useState(false);
+  const [cameraTestError, setCameraTestError] = useState("");
+  const [cameraTestMode, setCameraTestMode] = useState("auto");
   const abortRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectorRef = useRef(null);
   const zxingReaderRef = useRef(null);
   const rafRef = useRef(null);
+  const testVideoRef = useRef(null);
+  const testStreamRef = useRef(null);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
@@ -421,7 +426,7 @@ function GtinSearchPanel({ onOpenFiche }) {
     stopScanner();
   }
 
-  function buildScannerConstraints(mode) {
+  function buildCameraConstraints(mode) {
     if (mode === "rear") {
       return { video: { facingMode: { ideal: "environment" } } };
     }
@@ -441,8 +446,32 @@ function GtinSearchPanel({ onOpenFiche }) {
   }
 
   function openScanner(mode) {
+    setCameraTestOpen(false);
+    stopCameraTest();
     setScannerMode(mode);
     setScannerOpen(true);
+  }
+
+  function stopCameraTest() {
+    if (testStreamRef.current) {
+      testStreamRef.current.getTracks().forEach((track) => track.stop());
+      testStreamRef.current = null;
+    }
+    if (testVideoRef.current) {
+      testVideoRef.current.srcObject = null;
+    }
+  }
+
+  function closeCameraTest() {
+    setCameraTestOpen(false);
+    stopCameraTest();
+  }
+
+  function openCameraTest(mode) {
+    setScannerOpen(false);
+    stopScanner();
+    setCameraTestMode(mode);
+    setCameraTestOpen(true);
   }
 
   async function runSearch(gtinsToSearch) {
@@ -529,7 +558,7 @@ function GtinSearchPanel({ onOpenFiche }) {
 
     const startNativeDetector = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(buildScannerConstraints(scannerMode));
+        const stream = await navigator.mediaDevices.getUserMedia(buildCameraConstraints(scannerMode));
         if (!active) return;
         streamRef.current = stream;
         const video = videoRef.current;
@@ -570,7 +599,7 @@ function GtinSearchPanel({ onOpenFiche }) {
       try {
         const reader = new BrowserMultiFormatReader();
         zxingReaderRef.current = reader;
-        const constraints = buildScannerConstraints(scannerMode);
+        const constraints = buildCameraConstraints(scannerMode);
         reader.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
           if (!active) return;
           if (result?.getText) {
@@ -602,6 +631,47 @@ function GtinSearchPanel({ onOpenFiche }) {
       stopScanner();
     };
   }, [scannerOpen, scannerMode]);
+
+  useEffect(() => {
+    if (!cameraTestOpen) {
+      stopCameraTest();
+      return undefined;
+    }
+    setCameraTestError("");
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraTestError("Caméra non disponible sur cet appareil.");
+      return undefined;
+    }
+
+    let active = true;
+
+    const startPreview = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(
+          buildCameraConstraints(cameraTestMode)
+        );
+        if (!active) return;
+        testStreamRef.current = stream;
+        const video = testVideoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          video.muted = true;
+          await video.play();
+        }
+      } catch (err) {
+        if (!active) return;
+        setCameraTestError("Accès caméra refusé ou indisponible.");
+      }
+    };
+
+    startPreview();
+
+    return () => {
+      active = false;
+      stopCameraTest();
+    };
+  }, [cameraTestOpen, cameraTestMode]);
 
   useEffect(() => {
     try {
@@ -790,6 +860,20 @@ function GtinSearchPanel({ onOpenFiche }) {
                 >
                   Scanner (HD)
                 </button>
+                <button
+                  type="button"
+                  onClick={() => openCameraTest("auto")}
+                  className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+                >
+                  Tester la caméra
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openCameraTest("rear")}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                >
+                  Tester (caméra arrière)
+                </button>
                 <span>Autorisez la caméra pour remplir automatiquement le GTIN.</span>
               </div>
             </div>
@@ -898,6 +982,7 @@ function GtinSearchPanel({ onOpenFiche }) {
               ref={videoRef}
               className="h-[320px] w-full object-cover"
               muted
+              autoPlay
               playsInline
             />
           </div>
@@ -912,6 +997,65 @@ function GtinSearchPanel({ onOpenFiche }) {
           )}
           <div className="text-xs text-neutral-500">
             Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+          </div>
+          <div className="text-xs text-neutral-500">
+            iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={cameraTestOpen} onClose={closeCameraTest} title="Tester la caméra">
+        <div className="space-y-3">
+          <div className="text-xs text-neutral-400">
+            Mode actuel:{" "}
+            {cameraTestMode === "rear"
+              ? "caméra arrière"
+              : cameraTestMode === "front"
+              ? "caméra avant"
+              : cameraTestMode === "highres"
+              ? "HD"
+              : "auto"}
+          </div>
+          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
+            <video
+              ref={testVideoRef}
+              className="h-[320px] w-full object-cover"
+              muted
+              autoPlay
+              playsInline
+            />
+          </div>
+          {cameraTestError ? (
+            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              {cameraTestError}
+            </div>
+          ) : (
+            <div className="text-sm text-neutral-300">
+              Prévisualisez la caméra pour valider l'accès et la mise au point.
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 text-xs text-neutral-400">
+            <button
+              type="button"
+              onClick={() => openCameraTest("auto")}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+            >
+              Relancer (auto)
+            </button>
+            <button
+              type="button"
+              onClick={() => openCameraTest("rear")}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+            >
+              Relancer (caméra arrière)
+            </button>
+            <button
+              type="button"
+              onClick={() => openCameraTest("front")}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+            >
+              Relancer (caméra avant)
+            </button>
           </div>
           <div className="text-xs text-neutral-500">
             iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).

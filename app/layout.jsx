@@ -1,6 +1,6 @@
 import "./globals.css";
 
-export const VERSION = "1.0.48";
+export const VERSION = "1.0.49";
 
 export const metadata = {
   title: "Rappel Conso RSS Viewer",
