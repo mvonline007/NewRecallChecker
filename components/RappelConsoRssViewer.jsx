@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.57";
+const APP_VERSION = "1.0.58";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -369,6 +369,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
   const scanStartRef = useRef(0);
   const lastScannedRef = useRef("");
   const lastScanAtRef = useRef(0);
+  const scanBusyRef = useRef(false);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
@@ -529,10 +530,18 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     if (cleaned === lastScannedRef.current && now - lastScanAtRef.current < 2000) {
       return;
     }
+    if (scanBusyRef.current) {
+      return;
+    }
     lastScannedRef.current = cleaned;
     lastScanAtRef.current = now;
     setGtinRaw(cleaned);
-    await runSearch(normalizeGtinInput(cleaned), { limitOverride: 1, clearInput: false });
+    scanBusyRef.current = true;
+    try {
+      await runSearch(normalizeGtinInput(cleaned), { limitOverride: 1, clearInput: false });
+    } finally {
+      scanBusyRef.current = false;
+    }
   }
 
   async function search() {
@@ -576,7 +585,6 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
               const cleaned = String(rawValue).replace(/[^0-9]/g, "");
               if (cleaned) {
                 await handleDetectedGtin(cleaned);
-                return;
               }
             }
           } catch (err) {
