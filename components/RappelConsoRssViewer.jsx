@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.60";
+const APP_VERSION = "1.0.61";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -816,32 +816,36 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
             <div className="md:col-span-6">
-              <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
-              <div className="mt-1 flex items-center gap-2">
-                <input
-                  value={gtinRaw}
-                  onChange={(e) => setGtinRaw(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") search();
-                  }}
-                  placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
-                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-                />
-                <button
-                  onClick={search}
-                  disabled={loading}
-                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
-                >
-                  {loading ? "…" : "Search"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openScanner("rear")}
-                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
-                >
-                  Caméra
-                </button>
-              </div>
+              {!cameraTestOpen ? (
+                <>
+                  <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      value={gtinRaw}
+                      onChange={(e) => setGtinRaw(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") search();
+                      }}
+                      placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
+                      className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                    />
+                    <button
+                      onClick={search}
+                      disabled={loading}
+                      className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
+                    >
+                      {loading ? "…" : "Search"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openScanner("rear")}
+                      className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
+                    >
+                      Caméra
+                    </button>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             <div className="md:col-span-6 text-xs text-neutral-500" />
@@ -913,61 +917,67 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
                 <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                   {cameraTestError}
                 </div>
-              ) : (
-                <div className="text-sm text-neutral-300">
-                  {scanActive
-                    ? "Placez le code-barres dans le cadre pour le détecter automatiquement."
-                    : "Prévisualisez la caméra pour valider l'accès et la mise au point."}
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2 text-xs text-neutral-400">
-                {scanActive ? (
-                  <button
-                    type="button"
-                    onClick={() => openCameraTest(cameraTestMode)}
-                    className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                  >
-                    Passer en test caméra
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => openScanner(cameraTestMode)}
-                    className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
-                  >
-                    Activer le scan
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => (scanActive ? openScanner("auto") : openCameraTest("auto"))}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Relancer (auto)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => (scanActive ? openScanner("rear") : openCameraTest("rear"))}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Relancer (caméra arrière)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => (scanActive ? openScanner("front") : openCameraTest("front"))}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Relancer (caméra avant)
-                </button>
-              </div>
-              {scanActive ? (
-                <div className="text-xs text-neutral-500">
-                  Astuce: privilégiez un bon éclairage pour une détection plus rapide.
-                </div>
               ) : null}
-              <div className="text-xs text-neutral-500">
-                iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
-              </div>
+              <details className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-400">
+                <summary className="cursor-pointer select-none text-neutral-300">
+                  Aide &amp; options scanner
+                </summary>
+                <span className="mt-2 block space-y-2">
+                  <span className="block text-sm text-neutral-300">
+                    {scanActive
+                      ? "Placez le code-barres dans le cadre pour le détecter automatiquement."
+                      : "Prévisualisez la caméra pour valider l'accès et la mise au point."}
+                  </span>
+                  <span className="flex flex-wrap gap-2 text-xs text-neutral-400">
+                    {scanActive ? (
+                      <button
+                        type="button"
+                        onClick={() => openCameraTest(cameraTestMode)}
+                        className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                      >
+                        Passer en test caméra
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openScanner(cameraTestMode)}
+                        className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+                      >
+                        Activer le scan
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => (scanActive ? openScanner("auto") : openCameraTest("auto"))}
+                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    >
+                      Relancer (auto)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => (scanActive ? openScanner("rear") : openCameraTest("rear"))}
+                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    >
+                      Relancer (caméra arrière)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => (scanActive ? openScanner("front") : openCameraTest("front"))}
+                      className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                    >
+                      Relancer (caméra avant)
+                    </button>
+                  </span>
+                  {scanActive ? (
+                    <span className="block text-xs text-neutral-500">
+                      Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+                    </span>
+                  ) : null}
+                  <span className="block text-xs text-neutral-500">
+                    iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
+                  </span>
+                </span>
+              </details>
             </div>
           </div>
         </div>
