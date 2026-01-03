@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-export const VERSION = "1.0.72";
+export const VERSION = "1.0.73";
 
 const emptyStatus = { type: "", message: "" };
 const CRON_SCHEDULE = "0 6 * * *";
@@ -326,7 +326,18 @@ export default function ConfigPage() {
                     <div className="text-xs text-neutral-500">
                       Select one or more distributeurs (leave empty for all).
                     </div>
-                    <div className="flex justify-end">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+                        onClick={() => {
+                          const next = [...recipientConfigs];
+                          next[index] = { ...next[index], distributeurs: [] };
+                          setRecipientConfigs(next);
+                        }}
+                      >
+                        Clear selection
+                      </button>
                       <button
                         type="button"
                         className="rounded-xl border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
