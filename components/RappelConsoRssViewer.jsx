@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.59";
+const APP_VERSION = "1.0.60";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -902,7 +902,7 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
             <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
               <video
                 ref={videoRef}
-                className="h-[240px] w-full object-cover"
+                className="h-[120px] w-full object-cover"
                 muted
                 autoPlay
                 playsInline
