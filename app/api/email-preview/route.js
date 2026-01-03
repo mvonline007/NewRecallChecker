@@ -3,7 +3,7 @@ import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.49";
+export const VERSION = "1.0.50";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 

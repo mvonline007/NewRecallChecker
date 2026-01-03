@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.49";
+const APP_VERSION = "1.0.50";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -357,20 +357,16 @@ function GtinSearchPanel({ onOpenFiche }) {
   const [datasetUsed, setDatasetUsed] = useState(null);
   const [records, setRecords] = useState([]);
   const [lastUrl, setLastUrl] = useState("");
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [scannerError, setScannerError] = useState("");
-  const [scannerMode, setScannerMode] = useState("auto");
   const [cameraTestOpen, setCameraTestOpen] = useState(false);
   const [cameraTestError, setCameraTestError] = useState("");
   const [cameraTestMode, setCameraTestMode] = useState("auto");
+  const [scanActive, setScanActive] = useState(false);
   const abortRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectorRef = useRef(null);
   const zxingReaderRef = useRef(null);
   const rafRef = useRef(null);
-  const testVideoRef = useRef(null);
-  const testStreamRef = useRef(null);
 
   const gtins = useMemo(() => normalizeGtinInput(gtinRaw), [gtinRaw]);
 
@@ -421,11 +417,6 @@ function GtinSearchPanel({ onOpenFiche }) {
     }
   }
 
-  function closeScanner() {
-    setScannerOpen(false);
-    stopScanner();
-  }
-
   function buildCameraConstraints(mode) {
     if (mode === "rear") {
       return { video: { facingMode: { ideal: "environment" } } };
@@ -446,31 +437,21 @@ function GtinSearchPanel({ onOpenFiche }) {
   }
 
   function openScanner(mode) {
-    setCameraTestOpen(false);
-    stopCameraTest();
-    setScannerMode(mode);
-    setScannerOpen(true);
-  }
-
-  function stopCameraTest() {
-    if (testStreamRef.current) {
-      testStreamRef.current.getTracks().forEach((track) => track.stop());
-      testStreamRef.current = null;
-    }
-    if (testVideoRef.current) {
-      testVideoRef.current.srcObject = null;
-    }
+    stopScanner();
+    setCameraTestMode(mode);
+    setScanActive(true);
+    setCameraTestOpen(true);
   }
 
   function closeCameraTest() {
     setCameraTestOpen(false);
-    stopCameraTest();
+    setScanActive(false);
+    stopScanner();
   }
 
   function openCameraTest(mode) {
-    setScannerOpen(false);
-    stopScanner();
     setCameraTestMode(mode);
+    setScanActive(false);
     setCameraTestOpen(true);
   }
 
@@ -536,21 +517,14 @@ function GtinSearchPanel({ onOpenFiche }) {
   }
 
   useEffect(() => {
-    if (!scannerOpen) {
+    if (!cameraTestOpen || !scanActive) {
       stopScanner();
       return undefined;
     }
-    setScannerError("");
+    setCameraTestError("");
 
     if (!navigator?.mediaDevices?.getUserMedia) {
-      setScannerError("Caméra non disponible sur cet appareil.");
-      return undefined;
-    }
-
-    if (!("BarcodeDetector" in window)) {
-      setScannerError(
-        "Le scanner n'est pas supporté par ce navigateur. Utilisez Chrome ou Edge récent."
-      );
+      setCameraTestError("Caméra non disponible sur cet appareil.");
       return undefined;
     }
 
@@ -558,7 +532,7 @@ function GtinSearchPanel({ onOpenFiche }) {
 
     const startNativeDetector = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(buildCameraConstraints(scannerMode));
+        const stream = await navigator.mediaDevices.getUserMedia(buildCameraConstraints(cameraTestMode));
         if (!active) return;
         streamRef.current = stream;
         const video = videoRef.current;
@@ -577,20 +551,20 @@ function GtinSearchPanel({ onOpenFiche }) {
               const rawValue = barcodes[0]?.rawValue || "";
               const cleaned = String(rawValue).replace(/[^0-9]/g, "");
               if (cleaned) {
-                closeScanner();
+                closeCameraTest();
                 setGtinRaw(cleaned);
                 runSearch(normalizeGtinInput(cleaned));
                 return;
               }
             }
           } catch (err) {
-            setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+            setCameraTestError("Impossible de détecter le code-barres. Ajustez la mise au point.");
           }
           rafRef.current = requestAnimationFrame(tick);
         };
         rafRef.current = requestAnimationFrame(tick);
       } catch (err) {
-        setScannerError("Accès caméra refusé ou indisponible.");
+        setCameraTestError("Accès caméra refusé ou indisponible.");
       }
     };
 
@@ -599,24 +573,24 @@ function GtinSearchPanel({ onOpenFiche }) {
       try {
         const reader = new BrowserMultiFormatReader();
         zxingReaderRef.current = reader;
-        const constraints = buildCameraConstraints(scannerMode);
+        const constraints = buildCameraConstraints(cameraTestMode);
         reader.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
           if (!active) return;
           if (result?.getText) {
             const cleaned = String(result.getText()).replace(/[^0-9]/g, "");
             if (cleaned) {
-              closeScanner();
+              closeCameraTest();
               setGtinRaw(cleaned);
               runSearch(normalizeGtinInput(cleaned));
             }
             return;
           }
           if (err && err?.name !== "NotFoundException") {
-            setScannerError("Impossible de détecter le code-barres. Ajustez la mise au point.");
+            setCameraTestError("Impossible de détecter le code-barres. Ajustez la mise au point.");
           }
         });
       } catch (err) {
-        setScannerError("Accès caméra refusé ou indisponible.");
+        setCameraTestError("Accès caméra refusé ou indisponible.");
       }
     };
 
@@ -630,11 +604,10 @@ function GtinSearchPanel({ onOpenFiche }) {
       active = false;
       stopScanner();
     };
-  }, [scannerOpen, scannerMode]);
+  }, [cameraTestOpen, scanActive, cameraTestMode]);
 
   useEffect(() => {
-    if (!cameraTestOpen) {
-      stopCameraTest();
+    if (!cameraTestOpen || scanActive) {
       return undefined;
     }
     setCameraTestError("");
@@ -652,8 +625,8 @@ function GtinSearchPanel({ onOpenFiche }) {
           buildCameraConstraints(cameraTestMode)
         );
         if (!active) return;
-        testStreamRef.current = stream;
-        const video = testVideoRef.current;
+        streamRef.current = stream;
+        const video = videoRef.current;
         if (video) {
           video.srcObject = stream;
           video.muted = true;
@@ -669,9 +642,9 @@ function GtinSearchPanel({ onOpenFiche }) {
 
     return () => {
       active = false;
-      stopCameraTest();
+      stopScanner();
     };
-  }, [cameraTestOpen, cameraTestMode]);
+  }, [cameraTestOpen, scanActive, cameraTestMode]);
 
   useEffect(() => {
     try {
@@ -965,46 +938,11 @@ function GtinSearchPanel({ onOpenFiche }) {
         Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
       </div>
 
-      <Modal open={scannerOpen} onClose={closeScanner} title="Scanner un code-barres">
-        <div className="space-y-3">
-          <div className="text-xs text-neutral-400">
-            Mode actuel:{" "}
-            {scannerMode === "rear"
-              ? "caméra arrière"
-              : scannerMode === "front"
-              ? "caméra avant"
-              : scannerMode === "highres"
-              ? "HD"
-              : "auto"}
-          </div>
-          <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
-            <video
-              ref={videoRef}
-              className="h-[320px] w-full object-cover"
-              muted
-              autoPlay
-              playsInline
-            />
-          </div>
-          {scannerError ? (
-            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {scannerError}
-            </div>
-          ) : (
-            <div className="text-sm text-neutral-300">
-              Placez le code-barres dans le cadre pour le détecter automatiquement.
-            </div>
-          )}
-          <div className="text-xs text-neutral-500">
-            Astuce: privilégiez un bon éclairage pour une détection plus rapide.
-          </div>
-          <div className="text-xs text-neutral-500">
-            iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={cameraTestOpen} onClose={closeCameraTest} title="Tester la caméra">
+      <Modal
+        open={cameraTestOpen}
+        onClose={closeCameraTest}
+        title={scanActive ? "Scanner un code-barres" : "Tester la caméra"}
+      >
         <div className="space-y-3">
           <div className="text-xs text-neutral-400">
             Mode actuel:{" "}
@@ -1018,7 +956,7 @@ function GtinSearchPanel({ onOpenFiche }) {
           </div>
           <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
             <video
-              ref={testVideoRef}
+              ref={videoRef}
               className="h-[320px] w-full object-cover"
               muted
               autoPlay
@@ -1031,32 +969,56 @@ function GtinSearchPanel({ onOpenFiche }) {
             </div>
           ) : (
             <div className="text-sm text-neutral-300">
-              Prévisualisez la caméra pour valider l'accès et la mise au point.
+              {scanActive
+                ? "Placez le code-barres dans le cadre pour le détecter automatiquement."
+                : "Prévisualisez la caméra pour valider l'accès et la mise au point."}
             </div>
           )}
           <div className="flex flex-wrap gap-2 text-xs text-neutral-400">
+            {scanActive ? (
+              <button
+                type="button"
+                onClick={() => openCameraTest(cameraTestMode)}
+                className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+              >
+                Passer en test caméra
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => openScanner(cameraTestMode)}
+                className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+              >
+                Activer le scan
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => openCameraTest("auto")}
+              onClick={() => (scanActive ? openScanner("auto") : openCameraTest("auto"))}
               className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
             >
               Relancer (auto)
             </button>
             <button
               type="button"
-              onClick={() => openCameraTest("rear")}
+              onClick={() => (scanActive ? openScanner("rear") : openCameraTest("rear"))}
               className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
             >
               Relancer (caméra arrière)
             </button>
             <button
               type="button"
-              onClick={() => openCameraTest("front")}
+              onClick={() => (scanActive ? openScanner("front") : openCameraTest("front"))}
               className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
             >
               Relancer (caméra avant)
             </button>
           </div>
+          {scanActive ? (
+            <div className="text-xs text-neutral-500">
+              Astuce: privilégiez un bon éclairage pour une détection plus rapide.
+            </div>
+          ) : null}
           <div className="text-xs text-neutral-500">
             iPhone: utilisez Safari avec HTTPS et autorisez la caméra (Paramètres → Safari → Caméra).
           </div>
