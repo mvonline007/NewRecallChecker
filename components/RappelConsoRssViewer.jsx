@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.67";
+const APP_VERSION = "1.0.68";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
@@ -128,6 +128,9 @@ function buildFriendlyApiError(status, statusText, rawText) {
   if (rawMessage.includes("Unknown field: gtin")) {
     return SAFE_MESSAGE;
   }
+  if (String(rawMessage).toLowerCase().includes("good is safe")) {
+    return SAFE_MESSAGE;
+  }
   if (status === 400 && rawMessage.includes("ODSQL")) {
     return "La requête GTIN est invalide pour ce dataset. Essayez un autre dataset ou vérifiez le GTIN.";
   }
@@ -164,8 +167,9 @@ function toArray(v) {
 
 function isSafeMessage(message) {
   if (!message) return false;
-  const normalized = String(message).trim().replace(/\.$/, "").toLowerCase();
-  return normalized === SAFE_MESSAGE.replace(/\.$/, "").toLowerCase();
+  const normalized = String(message).trim().toLowerCase();
+  const needle = SAFE_MESSAGE.replace(/\.$/, "").toLowerCase();
+  return normalized.includes(needle);
 }
 
 function prettyDate(v) {
