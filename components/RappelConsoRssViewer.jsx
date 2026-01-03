@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.64";
+const APP_VERSION = "1.0.65";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
@@ -809,10 +809,16 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
 
   const renderSafeCard = () => (
     <div className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm">
-      <div className="flex flex-col items-center gap-3 p-6 text-center">
-        <img src={SAFE_BADGE_SRC} alt="Produit non rappelé" className="h-20 w-20" />
-        <div className="text-base font-semibold text-neutral-100">Produit non rappelé</div>
-        <div className="text-sm text-neutral-300">At this time the good is safe.</div>
+      <div className="relative aspect-[16/10] w-full overflow-hidden">
+        <ImageWithFallback src={SAFE_BADGE_SRC} alt="Produit non rappelé" />
+      </div>
+      <div className="space-y-2 p-4">
+        <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
+          Produit non rappelé
+        </div>
+        <div className="text-xs text-neutral-300/80 line-clamp-3">
+          At this time the good is safe.
+        </div>
       </div>
     </div>
   );
