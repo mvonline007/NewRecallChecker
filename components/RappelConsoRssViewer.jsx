@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.51";
+const APP_VERSION = "1.0.52";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -350,7 +350,7 @@ function extractImageUrls(record) {
 function GtinSearchPanel({ onOpenFiche }) {
   const [mode, setMode] = useState("auto");
   const [gtinRaw, setGtinRaw] = useState("");
-  const [limit, setLimit] = useState(50);
+  const limit = 50;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hits, setHits] = useState(0);
@@ -797,62 +797,33 @@ function GtinSearchPanel({ onOpenFiche }) {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
             <div className="md:col-span-6">
               <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
-              <input
-                value={gtinRaw}
-                onChange={(e) => setGtinRaw(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") search();
-                }}
-                placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
-                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-              />
-              <div className="mt-1 text-xs text-neutral-500">
-                Normalisé: {gtins.length ? gtins.join(", ") : "—"}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  value={gtinRaw}
+                  onChange={(e) => setGtinRaw(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") search();
+                  }}
+                  placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
+                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                />
+                <button
+                  onClick={search}
+                  disabled={loading}
+                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
+                >
+                  {loading ? "…" : "Search"}
+                </button>
                 <button
                   type="button"
                   onClick={() => openScanner("auto")}
-                  className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
+                  className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
                 >
-                  Scanner (auto)
+                  Caméra
                 </button>
-                <button
-                  type="button"
-                  onClick={() => openScanner("rear")}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Scanner (caméra arrière)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openScanner("front")}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Scanner (caméra avant)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openScanner("highres")}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Scanner (HD)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openCameraTest("auto")}
-                  className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-800"
-                >
-                  Tester la caméra
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openCameraTest("rear")}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                >
-                  Tester (caméra arrière)
-                </button>
-                <span>Autorisez la caméra pour remplir automatiquement le GTIN.</span>
+              </div>
+              <div className="mt-1 text-xs text-neutral-500">
+                Normalisé: {gtins.length ? gtins.join(", ") : "—"}
               </div>
             </div>
 
@@ -876,27 +847,8 @@ function GtinSearchPanel({ onOpenFiche }) {
               </div>
             </div>
 
-            <div className="md:col-span-2">
-              <label className="text-xs text-neutral-400">Limit</label>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={limit}
-                onChange={(e) => setLimit(Math.max(1, Math.min(100, Number(e.target.value || 50))))}
-                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
-              />
-              <div className="mt-1 text-xs text-neutral-500">1–100</div>
-            </div>
-
-            <div className="md:col-span-1 flex items-end">
-              <button
-                onClick={search}
-                disabled={loading}
-                className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
-              >
-                {loading ? "…" : "Search"}
-              </button>
+            <div className="md:col-span-3 text-xs text-neutral-500">
+              Autorisez la caméra pour remplir automatiquement le GTIN.
             </div>
           </div>
 
@@ -932,10 +884,7 @@ function GtinSearchPanel({ onOpenFiche }) {
 
       {!loading && datasetUsed && !records.length && !error ? (
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
-          Aucun résultat.
-          <div className="mt-2 text-neutral-500">
-            Tips: vérifier le GTIN (13 chiffres), ou passer sur “V2 (GTIN espacés)”.
-          </div>
+          At this time the good is safe.
         </div>
       ) : null}
 
