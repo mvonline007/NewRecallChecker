@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-export const VERSION = "1.0.71";
+export const VERSION = "1.0.72";
 
 const emptyStatus = { type: "", message: "" };
 const CRON_SCHEDULE = "0 6 * * *";
@@ -26,11 +26,51 @@ function formatDate(value) {
   return dt.toLocaleString();
 }
 
+function formatEmailConfig(config) {
+  if (!config) return "";
+  const recipients = Array.isArray(config.recipients) ? config.recipients.join(", ") : "";
+  return [
+    config.user ? `user=${config.user}` : "user=missing",
+    `recipients=${recipients || "missing"}`,
+    `appPasswordConfigured=${config.appPasswordConfigured ? "yes" : "no"}`,
+    `appPasswordLength=${config.appPasswordLength ?? 0}`,
+    config.service ? `service=${config.service}` : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function filterDistributeurOptions(options, query) {
   if (!query) return options;
   const normalized = query.trim().toLowerCase();
   if (!normalized) return options;
   return options.filter((option) => option.toLowerCase().includes(normalized));
+}
+
+function Modal({ open, onClose, title, children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        className="absolute inset-0 bg-black/70"
+        onClick={onClose}
+        role="button"
+        tabIndex={0}
+      />
+      <div className="relative z-10 w-[min(900px,92vw)] max-h-[88vh] overflow-auto rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl">
+        <div className="sticky top-0 flex items-center justify-between gap-4 border-b border-neutral-800 bg-neutral-950/90 px-4 py-3 backdrop-blur">
+          <div className="text-sm font-semibold text-neutral-100 line-clamp-1">{title}</div>
+          <button
+            className="rounded-lg border border-neutral-700 px-3 py-1 text-sm text-neutral-200 hover:bg-neutral-900"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 export default function ConfigPage() {
@@ -44,6 +84,10 @@ export default function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState(null);
   const [summary, setSummary] = useState(null);
+  const [testEmailStatus, setTestEmailStatus] = useState(null);
+  const [testEmailSending, setTestEmailSending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewKey, setPreviewKey] = useState(0);
 
   const loadDistributeurs = async (headers) => {
     try {
@@ -149,16 +193,71 @@ export default function ConfigPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const previewUrl = useMemo(() => {
+    const secret = cronSecret.trim();
+    const params = new URLSearchParams();
+    if (secret) params.set("secret", secret);
+    const query = params.toString();
+    return query ? `/api/email-preview?${query}` : "/api/email-preview";
+  }, [cronSecret]);
+
+  const sendTestEmail = async () => {
+    if (testEmailSending) return;
+    setTestEmailSending(true);
+    setTestEmailStatus(null);
+    try {
+      const headers = {};
+      if (cronSecret.trim()) {
+        headers.Authorization = `Bearer ${cronSecret.trim()}`;
+      }
+      const res = await fetch("/api/test-email", {
+        method: "POST",
+        headers
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message = payload?.error || `Request failed (${res.status})`;
+        const details = formatEmailConfig(payload?.details?.emailConfig);
+        setTestEmailStatus({
+          type: "error",
+          message,
+          details
+        });
+        return;
+      }
+      setTestEmailStatus({
+        type: "success",
+        message: `Test email sent (${payload?.emailMode || "ok"})`,
+        details: ""
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      setTestEmailStatus({ type: "error", message });
+    } finally {
+      setTestEmailSending(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
-        <div className="space-y-2">
-          <div className="text-2xl font-semibold">Email configuration</div>
-          <p className="text-sm text-neutral-400">
-            Configure which email address(es) receive cron alerts and which Distributeurs should
-            trigger them. Leave Distributeurs blank to receive all alerts. The cron job will use this
-            configuration before falling back to the ALERT_EMAIL_TO environment variable.
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <div className="text-2xl font-semibold">Email configuration</div>
+            <p className="text-sm text-neutral-400">
+              Configure which email address(es) receive cron alerts and which Distributeurs should
+              trigger them. Leave Distributeurs blank to receive all alerts. The cron job will use this
+              configuration before falling back to the ALERT_EMAIL_TO environment variable.
+            </p>
+          </div>
+          <a
+            href="/"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-900"
+            aria-label="Close and return to dashboard"
+            title="Close"
+          >
+            ×
+          </a>
         </div>
 
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
@@ -277,6 +376,43 @@ export default function ConfigPage() {
               </div>
             </div>
 
+            <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+              <div className="text-sm text-neutral-200">Email tests</div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  className="rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+                  onClick={sendTestEmail}
+                  disabled={testEmailSending}
+                >
+                  {testEmailSending ? "Sending…" : "Send test email"}
+                </button>
+                <button
+                  className="rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+                  onClick={() => {
+                    setPreviewKey((val) => val + 1);
+                    setPreviewOpen(true);
+                  }}
+                  type="button"
+                >
+                  Preview email
+                </button>
+              </div>
+              {testEmailStatus && (
+                <div className="mt-3 text-xs">
+                  <div
+                    className={
+                      testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
+                    }
+                  >
+                    {testEmailStatus.message}
+                  </div>
+                  {testEmailStatus.details && (
+                    <div className="text-neutral-400">{testEmailStatus.details}</div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center gap-2">
               <button
                 className="rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
@@ -292,12 +428,6 @@ export default function ConfigPage() {
               >
                 {saving ? "Saving…" : "Save configuration"}
               </button>
-              <a
-                href="/"
-                className="rounded-xl border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
-              >
-                Back to dashboard
-              </a>
             </div>
 
             {status.message && (
@@ -355,6 +485,29 @@ export default function ConfigPage() {
           <div className="mt-4 text-xs text-neutral-500">Version {VERSION}</div>
         </div>
       </div>
+
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Email preview">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+            <span>Preview is rendered from the email template.</span>
+            <button
+              type="button"
+              className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
+              onClick={() => setPreviewKey((val) => val + 1)}
+            >
+              Reload preview
+            </button>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-neutral-800">
+            <iframe
+              key={previewKey}
+              title="email-preview"
+              src={previewUrl}
+              className="h-[75vh] w-full bg-white"
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

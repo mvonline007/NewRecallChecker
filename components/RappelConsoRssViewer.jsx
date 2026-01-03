@@ -6,7 +6,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.71";
+const APP_VERSION = "1.0.72";
 const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";
@@ -183,20 +183,6 @@ function buildRecordsUrl(datasetId, params) {
   });
   url.search = sp.toString();
   return url.toString();
-}
-
-function formatEmailConfig(config) {
-  if (!config) return "";
-  const recipients = Array.isArray(config.recipients) ? config.recipients.join(", ") : "";
-  return [
-    config.user ? `user=${config.user}` : "user=missing",
-    `recipients=${recipients || "missing"}`,
-    `appPasswordConfigured=${config.appPasswordConfigured ? "yes" : "no"}`,
-    `appPasswordLength=${config.appPasswordLength ?? 0}`,
-    config.service ? `service=${config.service}` : null
-  ]
-    .filter(Boolean)
-    .join(" · ");
 }
 
 function openExternal(url) {
@@ -1138,11 +1124,6 @@ export default function RappelConsoRssViewer() {
   const [ficheOpen, setFicheOpen] = useState(false);
   const [ficheUrl, setFicheUrl] = useState("");
   const [toast, setToast] = useState(null);
-  const [cronSecret, setCronSecret] = useState("");
-  const [testEmailStatus, setTestEmailStatus] = useState(null);
-  const [testEmailSending, setTestEmailSending] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewKey, setPreviewKey] = useState(0);
 
   const distributeurOptions = useMemo(() => {
     const set = new Set();
@@ -1335,50 +1316,6 @@ export default function RappelConsoRssViewer() {
   }, [selectedDistributeurs]);
 
   const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
-  const previewUrl = useMemo(() => {
-    const secret = cronSecret.trim();
-    const params = new URLSearchParams();
-    if (secret) params.set("secret", secret);
-    const query = params.toString();
-    return query ? `/api/email-preview?${query}` : "/api/email-preview";
-  }, [cronSecret]);
-
-  const sendTestEmail = async () => {
-    if (testEmailSending) return;
-    setTestEmailSending(true);
-    setTestEmailStatus(null);
-    try {
-      const headers = {};
-      if (cronSecret.trim()) {
-        headers.Authorization = `Bearer ${cronSecret.trim()}`;
-      }
-      const res = await fetch("/api/test-email", {
-        method: "POST",
-        headers
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const message = payload?.error || `Request failed (${res.status})`;
-        const details = formatEmailConfig(payload?.details?.emailConfig);
-        setTestEmailStatus({
-          type: "error",
-          message,
-          details
-        });
-        return;
-      }
-      setTestEmailStatus({
-        type: "success",
-        message: `Test email sent (${payload?.emailMode || "ok"})`,
-        details: ""
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unexpected error";
-      setTestEmailStatus({ type: "error", message });
-    } finally {
-      setTestEmailSending(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
@@ -1627,58 +1564,6 @@ export default function RappelConsoRssViewer() {
                 </div>
               </div>
             </div>
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
-              <div className="space-y-3">
-                <div className="text-lg font-semibold">Email tests</div>
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
-                  <label className="text-xs text-neutral-400" htmlFor="cron-secret">
-                    Cron secret
-                  </label>
-                  <input
-                    id="cron-secret"
-                    type="password"
-                    className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
-                    placeholder="Optional"
-                    value={cronSecret}
-                    onChange={(event) => setCronSecret(event.target.value)}
-                  />
-                  <button
-                    className={classNames(
-                      "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
-                      testEmailSending && "opacity-60"
-                    )}
-                    onClick={sendTestEmail}
-                    disabled={testEmailSending}
-                  >
-                    {testEmailSending ? "Sending…" : "Send test email"}
-                  </button>
-                  <button
-                    className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                    onClick={() => {
-                      setPreviewKey((val) => val + 1);
-                      setPreviewOpen(true);
-                    }}
-                    type="button"
-                  >
-                    Preview email
-                  </button>
-                  {testEmailStatus && (
-                    <span className="flex flex-col text-xs">
-                      <span
-                        className={classNames(
-                          testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
-                        )}
-                      >
-                        {testEmailStatus.message}
-                      </span>
-                      {testEmailStatus.details && (
-                        <span className="text-neutral-400">{testEmailStatus.details}</span>
-                      )}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -1814,29 +1699,6 @@ export default function RappelConsoRssViewer() {
             ) : (
               <div className="p-6 text-sm text-neutral-400">No fiche URL</div>
             )}
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Email preview">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-            <span>Preview is rendered from the email template.</span>
-            <button
-              type="button"
-              className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-              onClick={() => setPreviewKey((val) => val + 1)}
-            >
-              Reload preview
-            </button>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-neutral-800">
-            <iframe
-              key={previewKey}
-              title="email-preview"
-              src={previewUrl}
-              className="h-[75vh] w-full bg-white"
-            />
           </div>
         </div>
       </Modal>
