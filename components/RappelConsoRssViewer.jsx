@@ -6,7 +6,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.81";
+const APP_VERSION = "1.0.82";
 const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
 const LS_GTIN_CAMERA_HIDE_MS = "rappelconso_gtin_camera_hide_ms_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
@@ -1374,7 +1374,7 @@ export default function RappelConsoRssViewer() {
       <div className="mx-auto max-w-6xl px-4 py-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="space-y-1">
-            <div className="text-xl font-semibold">Rappel Conso — Catégorie 01</div>
+            <div className="text-xl font-semibold">Rappel Conso — Toutes catégories</div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
               {lastUpdated && <Pill>Updated: {fmtDateDMY(lastUpdated)}</Pill>}
               {prevRefreshTs && <Pill>Prev refresh: {fmtDateDMY(prevRefreshTs)}</Pill>}

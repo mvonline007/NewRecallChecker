@@ -1,7 +1,7 @@
 import { listDistributeurs, VERSION as DISTRIBUTEUR_VERSION } from "@/lib/distributeurs";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.81";
+export const VERSION = "1.0.82";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
