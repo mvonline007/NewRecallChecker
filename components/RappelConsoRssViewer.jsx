@@ -15,7 +15,8 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.63";
+const APP_VERSION = "1.0.64";
+const SAFE_BADGE_SRC = "/safe-badge.svg";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -328,25 +329,6 @@ function ImageWithFallback({ src, alt }) {
       loading="lazy"
       onError={() => setBad(true)}
     />
-  );
-}
-
-function SafeBadgeIcon({ className }) {
-  return (
-    <svg
-      viewBox="0 0 512 512"
-      aria-hidden="true"
-      className={className}
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect width="512" height="512" fill="white" />
-      <circle cx="256" cy="256" r="200" fill="#3BB54A" />
-      <path
-        fill="#FFFFFF"
-        d="M212 228c18-34 30-68 34-98 2-16 26-18 34-4 4 8 6 20 4 36-2 12-6 28-10 44h66c30 0 44 20 40 44-2 14-10 26-22 30 6 6 10 16 8 28-2 14-12 24-26 28 4 6 6 14 4 24-4 18-20 32-40 32h-98c-18 0-30-6-40-14-4-4-10-6-16-6h-36V246h26c18 0 40-2 58-18z"
-      />
-      <rect x="120" y="246" width="52" height="140" rx="10" fill="#FFFFFF" />
-    </svg>
   );
 }
 
@@ -825,6 +807,16 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     );
   };
 
+  const renderSafeCard = () => (
+    <div className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm">
+      <div className="flex flex-col items-center gap-3 p-6 text-center">
+        <img src={SAFE_BADGE_SRC} alt="Produit non rappelé" className="h-20 w-20" />
+        <div className="text-base font-semibold text-neutral-100">Produit non rappelé</div>
+        <div className="text-sm text-neutral-300">At this time the good is safe.</div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {!cameraTestOpen ? (
@@ -1002,22 +994,10 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
       ) : null}
 
       {cameraTestOpen && (
-        <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {records.map((r, i) => renderCard(r, i))}
-          </div>
-          {!loading && datasetUsed && !records.length && !error ? (
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
-              <div className="flex flex-col items-center gap-3 text-center">
-                <SafeBadgeIcon className="h-20 w-20" />
-                <div className="text-base font-semibold text-neutral-100">Produit non rappelé</div>
-                <div className="text-sm text-neutral-300">
-                  At this time the good is safe.
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {records.map((r, i) => renderCard(r, i))}
+          {!loading && datasetUsed && !records.length && !error ? renderSafeCard() : null}
+        </div>
       )}
     </div>
   );
