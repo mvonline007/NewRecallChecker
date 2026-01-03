@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.52";
+const APP_VERSION = "1.0.53";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -124,7 +124,7 @@ function buildFriendlyApiError(status, statusText, rawText) {
   const parsed = parseApiErrorPayload(rawText);
   const rawMessage = parsed?.message || parsed?.error || rawText || "";
   if (rawMessage.includes("Unknown field: gtin")) {
-    return "Le champ GTIN est introuvable dans ce dataset. Essayez “V2 (GTIN espacés)”.";
+    return "At this time the good is safe";
   }
   if (status === 400 && rawMessage.includes("ODSQL")) {
     return "La requête GTIN est invalide pour ce dataset. Essayez un autre dataset ou vérifiez le GTIN.";
@@ -347,8 +347,7 @@ function extractImageUrls(record) {
   return urls;
 }
 
-function GtinSearchPanel({ onOpenFiche }) {
-  const [mode, setMode] = useState("auto");
+function GtinSearchPanel({ onOpenFiche, mode }) {
   const [gtinRaw, setGtinRaw] = useState("");
   const limit = 50;
   const [loading, setLoading] = useState(false);
@@ -789,9 +788,6 @@ function GtinSearchPanel({ onOpenFiche }) {
         <div className="flex flex-col gap-4">
           <div className="space-y-1">
             <div className="text-lg font-semibold">Recherche GTIN</div>
-            <div className="text-xs text-neutral-400">
-              Source: {GTIN_DATASETS.trie.id} / {GTIN_DATASETS.espaces.id}
-            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
@@ -827,28 +823,8 @@ function GtinSearchPanel({ onOpenFiche }) {
               </div>
             </div>
 
-            <div className="md:col-span-3">
-              <label className="text-xs text-neutral-400">Dataset</label>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
-              >
-                <option value="auto">Auto (trie → fallback espaces)</option>
-                <option value="trie">{GTIN_DATASETS.trie.label}</option>
-                <option value="espaces">{GTIN_DATASETS.espaces.label}</option>
-              </select>
-              <div className="mt-1 text-xs text-neutral-500">
-                {mode === "trie"
-                  ? GTIN_DATASETS.trie.hint
-                  : mode === "espaces"
-                  ? GTIN_DATASETS.espaces.hint
-                  : "Recherche exacte puis fallback"}
-              </div>
-            </div>
-
-            <div className="md:col-span-3 text-xs text-neutral-500">
-              Autorisez la caméra pour remplir automatiquement le GTIN.
+            <div className="md:col-span-6 text-xs text-neutral-500">
+              Sélectionnez un dataset dans l’onglet Config.
             </div>
           </div>
 
@@ -865,9 +841,7 @@ function GtinSearchPanel({ onOpenFiche }) {
                   Dataset: <span className="font-medium">{GTIN_DATASETS[datasetUsed].id}</span> •
                   Résultats: <span className="font-medium">{hits}</span>
                 </>
-              ) : (
-                <>Prêt</>
-              )}
+              ) : null}
             </div>
             {lastUrl ? (
               <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
@@ -887,10 +861,6 @@ function GtinSearchPanel({ onOpenFiche }) {
           At this time the good is safe.
         </div>
       ) : null}
-
-      <div className="text-xs text-neutral-500">
-        Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
-      </div>
 
       <Modal
         open={cameraTestOpen}
@@ -1100,6 +1070,7 @@ export default function RappelConsoRssViewer() {
 
   const [activeTab, setActiveTab] = useState("rss");
   const [mode, setMode] = useState("gallery");
+  const [gtinDatasetMode, setGtinDatasetMode] = useState("auto");
   const [q, setQ] = useState("");
   const [onlyWithImages, setOnlyWithImages] = useState(false);
   const [fromDate, setFromDate] = useState("");
@@ -1414,6 +1385,17 @@ export default function RappelConsoRssViewer() {
                 onClick={() => setActiveTab("gtin")}
               >
                 GTIN search
+              </button>
+              <button
+                className={classNames(
+                  "rounded-xl border px-3 py-2 text-sm",
+                  activeTab === "config"
+                    ? "border-neutral-200 bg-neutral-100 text-neutral-950"
+                    : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                )}
+                onClick={() => setActiveTab("config")}
+              >
+                Config
               </button>
             </div>
 
@@ -1768,7 +1750,38 @@ export default function RappelConsoRssViewer() {
                 setFicheUrl(url);
                 setFicheOpen(true);
               }
-            }} />
+            }} mode={gtinDatasetMode} />
+          </div>
+        )}
+        {activeTab === "config" && (
+          <div className="mt-6 space-y-4">
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+              <div className="space-y-3">
+                <div className="text-lg font-semibold">GTIN search</div>
+                <div className="md:max-w-md">
+                  <label className="text-xs text-neutral-400">Dataset</label>
+                  <select
+                    value={gtinDatasetMode}
+                    onChange={(e) => setGtinDatasetMode(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100"
+                  >
+                    <option value="auto">Auto (trie → fallback espaces)</option>
+                    <option value="trie">{GTIN_DATASETS.trie.label}</option>
+                    <option value="espaces">{GTIN_DATASETS.espaces.label}</option>
+                  </select>
+                  <div className="mt-1 text-xs text-neutral-500">
+                    {gtinDatasetMode === "trie"
+                      ? GTIN_DATASETS.trie.hint
+                      : gtinDatasetMode === "espaces"
+                      ? GTIN_DATASETS.espaces.hint
+                      : "Recherche exacte puis fallback"}
+                  </div>
+                </div>
+                <div className="text-xs text-neutral-500">
+                  Endpoint: {GTIN_API_BASE}/&lt;dataset&gt;/records
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
