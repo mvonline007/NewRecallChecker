@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.61";
+const APP_VERSION = "1.0.62";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
 const GTIN_DATASETS = {
@@ -808,73 +808,61 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
-        <div className="flex flex-col gap-4">
-          <div className="space-y-1">
-            <div className="text-lg font-semibold">Recherche GTIN</div>
-          </div>
+      {!cameraTestOpen ? (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+          <div className="flex flex-col gap-4">
+            <div className="space-y-1">
+              <div className="text-lg font-semibold">Recherche GTIN</div>
+            </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-            <div className="md:col-span-6">
-              {!cameraTestOpen ? (
-                <>
-                  <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
-                  <div className="mt-1 flex items-center gap-2">
-                    <input
-                      value={gtinRaw}
-                      onChange={(e) => setGtinRaw(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") search();
-                      }}
-                      placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
-                      className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-                    />
-                    <button
-                      onClick={search}
-                      disabled={loading}
-                      className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
-                    >
-                      {loading ? "…" : "Search"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openScanner("rear")}
-                      className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
-                    >
-                      Caméra
-                    </button>
-                  </div>
-                </>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+              <div className="md:col-span-6">
+                <label className="text-xs text-neutral-400">GTIN / EAN (un ou plusieurs)</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    value={gtinRaw}
+                    onChange={(e) => setGtinRaw(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") search();
+                    }}
+                    placeholder="ex: 3250391234567 (ou plusieurs séparés par espace/virgule)"
+                    className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+                  />
+                  <button
+                    onClick={search}
+                    disabled={loading}
+                    className="rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:opacity-60"
+                  >
+                    {loading ? "…" : "Search"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openScanner("rear")}
+                    className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800"
+                  >
+                    Caméra
+                  </button>
+                </div>
+              </div>
+
+              <div className="md:col-span-6 text-xs text-neutral-500" />
+            </div>
+
+            {error ? (
+              <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-300">
+              <div />
+              {lastUrl ? (
+                <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
+                  Ouvrir requête JSON
+                </a>
               ) : null}
             </div>
-
-            <div className="md:col-span-6 text-xs text-neutral-500" />
           </div>
-
-          {error ? (
-            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {error}
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-300">
-            <div />
-            {lastUrl ? (
-              <a href={lastUrl} target="_blank" rel="noreferrer" className="text-neutral-400 underline">
-                Ouvrir requête JSON
-              </a>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {records.map((r, i) => renderCard(r, i))}
-      </div>
-
-      {!loading && datasetUsed && !records.length && !error ? (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
-          At this time the good is safe.
         </div>
       ) : null}
 
@@ -982,6 +970,30 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
           </div>
         </div>
       ) : null}
+
+      {!cameraTestOpen && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {records.map((r, i) => renderCard(r, i))}
+        </div>
+      )}
+      {!cameraTestOpen && !loading && datasetUsed && !records.length && !error ? (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
+          At this time the good is safe.
+        </div>
+      ) : null}
+
+      {cameraTestOpen && (
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {records.map((r, i) => renderCard(r, i))}
+          </div>
+          {!loading && datasetUsed && !records.length && !error ? (
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-sm text-neutral-300">
+              At this time the good is safe.
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
