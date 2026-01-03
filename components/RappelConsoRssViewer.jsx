@@ -6,7 +6,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.80";
+const APP_VERSION = "1.0.81";
 const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
 const LS_GTIN_CAMERA_HIDE_MS = "rappelconso_gtin_camera_hide_ms_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
@@ -1647,11 +1647,11 @@ export default function RappelConsoRssViewer() {
                         <img
                           alt={`EAN-13 ${code}`}
                           src={`https://bwipjs-api.metafloor.com/?bcid=ean13&text=${code}&scale=4&height=12&includetext`}
-                          className="mt-2 w-full max-w-[220px] bg-neutral-900/40 p-2 mx-auto"
-                          style={{ filter: prefersDark ? "invert(1)" : "none", imageRendering: "auto" }}
+                          className={`mt-2 w-full max-w-[220px] p-2 mx-auto ${prefersDark ? "bg-white" : "bg-neutral-900/40"}`}
+                          style={{ filter: "none", imageRendering: "auto" }}
                         />
                         <div className="mt-1 text-[11px] text-neutral-500">
-                          Affichage {prefersDark ? "inversé" : "standard"} pour le mode{" "}
+                          Affichage {prefersDark ? "fond blanc" : "standard"} pour le mode{" "}
                           {prefersDark ? "sombre" : "clair"}.
                         </div>
                       </div>
