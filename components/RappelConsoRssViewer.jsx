@@ -15,7 +15,7 @@ import {
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.65";
+const APP_VERSION = "1.0.66";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
 const GTIN_API_BASE = `${GTIN_DOMAIN}/api/explore/v2.1/catalog/datasets`;
@@ -732,96 +732,91 @@ function GtinSearchPanel({ onOpenFiche, mode }) {
     };
   };
 
-  const renderCard = (r, idx) => {
-    const card = buildGtinCardData(r, idx);
-    return (
-      <div
-        key={card.id}
-        role="button"
-        tabIndex={0}
-        className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
-        onClick={() => {
-          if (card.link) onOpenFiche?.(card.link);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            if (card.link) onOpenFiche?.(card.link);
-          }
-        }}
-      >
-        <div className="relative aspect-[16/10] w-full overflow-hidden">
-          <ImageWithFallback src={card.enclosureUrl} alt={card.title} />
-          {card.link && (
-            <div className="absolute right-2 top-2">
-              <button
-                type="button"
-                onClick={() => onOpenFiche?.(card.link)}
-                className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
-                title="Open fiche inside app"
-              >
-                Fiche
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-2 p-4">
-          <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
-            {card.title || "(no title)"}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-            {card.pubDate && <Pill>{prettyDate(card.pubDate)}</Pill>}
-            {card.distLabel && <Pill>{card.distLabel}</Pill>}
-          </div>
-          <div className="text-xs text-neutral-300/80 line-clamp-3">
-            {card.descriptionText || "(no description)"}
-          </div>
-
-          {card.link && (
-            <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenFiche?.(card.link);
-                }}
-                className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
-              >
-                Open fiche
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  copyText(card.link);
-                }}
-                className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
-              >
-                Copy link
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const renderSafeCard = () => (
-    <div className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm">
+  const renderCardFromData = (card) => (
+    <div
+      key={card.id}
+      role={card.link ? "button" : undefined}
+      tabIndex={card.link ? 0 : undefined}
+      className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
+      onClick={() => {
+        if (card.link) onOpenFiche?.(card.link);
+      }}
+      onKeyDown={(e) => {
+        if (!card.link) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenFiche?.(card.link);
+        }
+      }}
+    >
       <div className="relative aspect-[16/10] w-full overflow-hidden">
-        <ImageWithFallback src={SAFE_BADGE_SRC} alt="Produit non rappelé" />
+        <ImageWithFallback src={card.enclosureUrl} alt={card.title} />
+        {card.link && (
+          <div className="absolute right-2 top-2">
+            <button
+              type="button"
+              onClick={() => onOpenFiche?.(card.link)}
+              className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
+              title="Open fiche inside app"
+            >
+              Fiche
+            </button>
+          </div>
+        )}
       </div>
+
       <div className="space-y-2 p-4">
         <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
-          Produit non rappelé
+          {card.title || "(no title)"}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+          {card.pubDate && <Pill>{prettyDate(card.pubDate)}</Pill>}
+          {card.distLabel && <Pill>{card.distLabel}</Pill>}
         </div>
         <div className="text-xs text-neutral-300/80 line-clamp-3">
-          At this time the good is safe.
+          {card.descriptionText || "(no description)"}
         </div>
+
+        {card.link && (
+          <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenFiche?.(card.link);
+              }}
+              className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
+            >
+              Open fiche
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                copyText(card.link);
+              }}
+              className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
+            >
+              Copy link
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
+
+  const renderCard = (r, idx) => renderCardFromData(buildGtinCardData(r, idx));
+
+  const renderSafeCard = () =>
+    renderCardFromData({
+      id: "safe-card",
+      title: "Produit non rappelé",
+      enclosureUrl: SAFE_BADGE_SRC,
+      pubDate: "",
+      link: "",
+      descriptionText: "At this time the good is safe.",
+      distLabel: ""
+    });
 
   return (
     <div className="space-y-4">
