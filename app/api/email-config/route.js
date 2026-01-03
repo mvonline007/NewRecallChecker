@@ -7,7 +7,7 @@ import {
 import { getEmailConfigSummary, VERSION as EMAIL_VERSION } from "@/lib/email";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.69";
+export const VERSION = "1.0.75";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -20,11 +20,12 @@ function isAuthorized(req) {
 function formatRecipientConfigEntry(entry) {
   if (!entry) return null;
   if (!Array.isArray(entry.distributeurs)) {
-    return { email: entry.email, distributeurs: [] };
+    return { email: entry.email, distributeurs: [], onlyNewItems: Boolean(entry.onlyNewItems) };
   }
   return {
     email: entry.email,
-    distributeurs: entry.distributeurs
+    distributeurs: entry.distributeurs,
+    onlyNewItems: Boolean(entry.onlyNewItems)
   };
 }
 

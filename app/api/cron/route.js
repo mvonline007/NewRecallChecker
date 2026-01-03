@@ -13,7 +13,7 @@ import { buildEmailHtml } from "@/lib/email-template";
 import { fetchRssItems, VERSION as RSS_VERSION } from "@/lib/rss";
 
 export const runtime = "nodejs";
-export const VERSION = "1.0.69";
+export const VERSION = "1.0.75";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_EMAIL_MODE = process.env.CRON_EMAIL_MODE || "auto";
@@ -48,36 +48,52 @@ function buildHashMap(items) {
   return new Map(items.map((item) => [item.id, hashItem(item)]));
 }
 
-function buildEmailContent({ newItems, changedItems, removedItems }) {
-  const totalChanges = newItems.length + changedItems.length + removedItems.length;
-  const subject = `RappelConso updates: ${totalChanges} change${totalChanges === 1 ? "" : "s"}`;
-
-  const formatList = (items) =>
-    items.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
-
+function buildNewItemsEmailContent(items) {
+  const subject = `RappelConso new items: ${items.length}`;
+  const formatList = (list) =>
+    list.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
   const text = [
-    `New items (${newItems.length}):`,
-    formatList(newItems) || "- none",
-    "",
-    `Changed items (${changedItems.length}):`,
-    formatList(changedItems) || "- none",
-    "",
-    `Removed items (${removedItems.length}):`,
-    formatList(removedItems) || "- none"
+    `New items (${items.length}):`,
+    formatList(items) || "- none"
   ].join("\n");
-
   const html = buildEmailHtml({
-    title: "RappelConso updates",
-    intro: "Latest changes detected in the RappelConso RSS feed.",
-    sections: [
-      { title: "New items", items: newItems },
-      { title: "Changed items", items: changedItems },
-      { title: "Removed items", items: removedItems }
-    ],
+    title: "RappelConso new items",
+    intro: "Latest new items detected in the RappelConso RSS feed.",
+    sections: [{ title: "New items", items }],
     footer: "View the full feed in the RappelConso RSS dashboard."
   });
-
   return { subject, text, html };
+}
+
+function buildLatestItemsEmailContent(items, intro) {
+  const subject = `RappelConso latest items: ${items.length}`;
+  const formatList = (list) =>
+    list.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
+  const text = [
+    intro || "Latest 10 items from the RSS feed.",
+    "",
+    formatList(items) || "- none"
+  ].join("\n");
+  const html = buildEmailHtml({
+    title: "RappelConso latest items",
+    intro: intro || "Latest 10 items from the RSS feed.",
+    sections: [{ title: "Latest 10 items", items }],
+    footer: "View the full feed in the RappelConso RSS dashboard."
+  });
+  return { subject, text, html };
+}
+
+function buildCombinedLatestItems({ newItems, latestItems }) {
+  const seen = new Set();
+  const merged = [];
+  const pushUnique = (item) => {
+    if (!item?.id || seen.has(item.id)) return;
+    seen.add(item.id);
+    merged.push(item);
+  };
+  newItems.forEach(pushUnique);
+  latestItems.forEach(pushUnique);
+  return merged;
 }
 
 async function buildEmailErrorDetails(error) {
@@ -94,27 +110,6 @@ function normalizeEmailMode(mode) {
   if (normalized === "diff") return "diff";
   if (normalized === "latest10") return "latest10";
   return "auto";
-}
-
-function buildTestingEmailContent(items) {
-  const subject = "RappelConso cron test: latest 10 items";
-  const formatList = (list) =>
-    list.map((item) => `- ${item.title || item.id} (${item.link || "no link"})`).join("\n");
-
-  const text = [
-    "Cron test email: latest 10 items from the RSS feed.",
-    "",
-    formatList(items) || "- none"
-  ].join("\n");
-
-  const html = buildEmailHtml({
-    title: "RappelConso latest items",
-    intro: "Cron test email: latest 10 items from the RSS feed.",
-    sections: [{ title: "Latest 10 items", items }],
-    footer: "View the full feed in the RappelConso RSS dashboard."
-  });
-
-  return { subject, text, html };
 }
 
 async function enrichItemsWithDistributeurs(items) {
@@ -136,7 +131,7 @@ async function enrichItemsWithDistributeurs(items) {
 async function sendFilteredEmails({ recipientConfigs, buildContent }) {
   const emailMessages = [];
   for (const recipient of recipientConfigs) {
-    const content = buildContent(recipient);
+    const content = await buildContent(recipient);
     if (!content) continue;
     const emailMessageId = await sendAlertEmail({
       ...content,
@@ -188,11 +183,11 @@ export async function GET(req) {
 
     let emailMessageId = null;
     let emailMode = "none";
-    const hasDiff = newItems.length || changedItems.length || removedItems.length;
     const desiredEmailMode = normalizeEmailMode(CRON_EMAIL_MODE);
     const shouldSendLatest10 = desiredEmailMode === "latest10" || !latestSnapshot;
-    const shouldSendDiff = desiredEmailMode === "diff" || desiredEmailMode === "auto";
+    const latestItems = currentItems.slice(0, 10);
     const recipientConfigs = await getEmailRecipientConfigs();
+    const hasRecipientOnlyNew = recipientConfigs.some((entry) => entry.onlyNewItems);
     if (recipientConfigs.length === 0) {
       return Response.json(
         {
@@ -205,63 +200,63 @@ export async function GET(req) {
       );
     }
 
-    if (shouldSendLatest10 && currentItems.length) {
-      const testingItems = currentItems.slice(0, 10);
-      const enrichedTestingItems = await enrichItemsWithDistributeurs(testingItems);
+    if ((shouldSendLatest10 && currentItems.length) || hasRecipientOnlyNew) {
+      let enrichedLatest = null;
+      let enrichedNew = null;
+      let enrichedCombined = null;
+      const getEnrichedLatest = async () => {
+        if (!enrichedLatest) {
+          enrichedLatest = await enrichItemsWithDistributeurs(latestItems);
+        }
+        return enrichedLatest;
+      };
+      const getEnrichedNew = async () => {
+        if (!enrichedNew) {
+          enrichedNew = await enrichItemsWithDistributeurs(newItems);
+        }
+        return enrichedNew;
+      };
+      const getEnrichedCombined = async () => {
+        if (!enrichedCombined) {
+          const combined = buildCombinedLatestItems({
+            newItems,
+            latestItems
+          });
+          enrichedCombined = await enrichItemsWithDistributeurs(combined);
+        }
+        return enrichedCombined;
+      };
       try {
         const emailMessages = await sendFilteredEmails({
           recipientConfigs,
-          buildContent: (recipient) => {
-            const filteredItems = filterItemsByDistributeurs(
-              enrichedTestingItems,
-              recipient.distributeurs
-            );
-            if (!filteredItems.length) return null;
-            return buildTestingEmailContent(filteredItems);
-          }
-        });
-        emailMessageId = emailMessages[0]?.messageId || null;
-        emailMode = emailMessages.length ? "test" : "none";
-      } catch (error) {
-        return Response.json(
-          { error: "Email send failed", details: await buildEmailErrorDetails(error) },
-          { status: 502 }
-        );
-      }
-    } else if (shouldSendDiff && latestSnapshot && hasDiff) {
-      const [enrichedNew, enrichedChanged, enrichedRemoved] = await Promise.all([
-        enrichItemsWithDistributeurs(newItems),
-        enrichItemsWithDistributeurs(changedItems),
-        enrichItemsWithDistributeurs(removedItems)
-      ]);
-      try {
-        const emailMessages = await sendFilteredEmails({
-          recipientConfigs,
-          buildContent: (recipient) => {
-            const filteredNew = filterItemsByDistributeurs(
-              enrichedNew,
-              recipient.distributeurs
-            );
-            const filteredChanged = filterItemsByDistributeurs(
-              enrichedChanged,
-              recipient.distributeurs
-            );
-            const filteredRemoved = filterItemsByDistributeurs(
-              enrichedRemoved,
-              recipient.distributeurs
-            );
-            if (!filteredNew.length && !filteredChanged.length && !filteredRemoved.length) {
+          buildContent: async (recipient) => {
+            if (recipient.onlyNewItems) {
+              const filteredNew = filterItemsByDistributeurs(
+                await getEnrichedNew(),
+                recipient.distributeurs
+              );
+              if (filteredNew.length) {
+                return buildNewItemsEmailContent(filteredNew);
+              }
               return null;
             }
-            return buildEmailContent({
-              newItems: filteredNew,
-              changedItems: filteredChanged,
-              removedItems: filteredRemoved
-            });
+            const filteredCombined = filterItemsByDistributeurs(
+              await getEnrichedCombined(),
+              recipient.distributeurs
+            );
+            if (!filteredCombined.length) return null;
+            return buildLatestItemsEmailContent(
+              filteredCombined,
+              "Latest 10 items, plus any new items (new first)."
+            );
           }
         });
         emailMessageId = emailMessages[0]?.messageId || null;
-        emailMode = emailMessages.length ? "diff" : "none";
+        if (emailMessages.length) {
+          emailMode = hasRecipientOnlyNew
+            ? "recipient-config"
+            : "latest-with-new";
+        }
       } catch (error) {
         return Response.json(
           { error: "Email send failed", details: await buildEmailErrorDetails(error) },

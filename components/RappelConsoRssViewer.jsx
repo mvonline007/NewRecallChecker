@@ -2,20 +2,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid
-} from "recharts";
 
 const LS_SEEN_IDS = "rappelconso_seen_ids_v1";
 const LS_LAST_REFRESH = "rappelconso_last_refresh_v1";
 const LS_LAST_NEW_IDS = "rappelconso_last_new_ids_v1";
-const APP_VERSION = "1.0.69";
+const APP_VERSION = "1.0.75";
+const LS_SELECTED_DISTRIBUTEURS = "rappelconso_selected_distributeurs_v1";
 const SAFE_BADGE_SRC = "/safe-badge.svg";
 const SAFE_MESSAGE = "At this time the good is safe.";
 const GTIN_DOMAIN = "https://data.economie.gouv.fr";
@@ -191,20 +183,6 @@ function buildRecordsUrl(datasetId, params) {
   });
   url.search = sp.toString();
   return url.toString();
-}
-
-function formatEmailConfig(config) {
-  if (!config) return "";
-  const recipients = Array.isArray(config.recipients) ? config.recipients.join(", ") : "";
-  return [
-    config.user ? `user=${config.user}` : "user=missing",
-    `recipients=${recipients || "missing"}`,
-    `appPasswordConfigured=${config.appPasswordConfigured ? "yes" : "no"}`,
-    `appPasswordLength=${config.appPasswordLength ?? 0}`,
-    config.service ? `service=${config.service}` : null
-  ]
-    .filter(Boolean)
-    .join(" · ");
 }
 
 function openExternal(url) {
@@ -1138,24 +1116,14 @@ export default function RappelConsoRssViewer() {
   const [detailsProgress, setDetailsProgress] = useState({ loaded: 0, total: 0, errors: 0 });
 
   const [activeTab, setActiveTab] = useState("rss");
-  const [mode, setMode] = useState("gallery");
   const [gtinDatasetMode, setGtinDatasetMode] = useState("auto");
   const [q, setQ] = useState("");
-  const [onlyWithImages, setOnlyWithImages] = useState(false);
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
   const [selectedDistributeurs, setSelectedDistributeurs] = useState([]);
 
   const [selected, setSelected] = useState(null);
   const [ficheOpen, setFicheOpen] = useState(false);
   const [ficheUrl, setFicheUrl] = useState("");
   const [toast, setToast] = useState(null);
-  const [pageSize, setPageSize] = useState(30);
-  const [cronSecret, setCronSecret] = useState("");
-  const [testEmailStatus, setTestEmailStatus] = useState(null);
-  const [testEmailSending, setTestEmailSending] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewKey, setPreviewKey] = useState(0);
 
   const distributeurOptions = useMemo(() => {
     const set = new Set();
@@ -1166,17 +1134,6 @@ export default function RappelConsoRssViewer() {
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     return items.filter((it) => {
-      if (onlyWithImages && !it.enclosureUrl) return false;
-
-      if (fromDate) {
-        const d = it.pubDateISO;
-        if (!d || d < fromDate) return false;
-      }
-      if (toDate) {
-        const d = it.pubDateISO;
-        if (!d || d > toDate) return false;
-      }
-
       if (selectedDistributeurs.length) {
         const dlist = detailsMap[it.id]?.distributeursList || [];
         if (!dlist.some((x) => selectedDistributeurs.includes(x))) return false;
@@ -1187,21 +1144,7 @@ export default function RappelConsoRssViewer() {
       const hay = `${it.title} ${it.descriptionText} ${dist}`.toLowerCase();
       return hay.includes(qq);
     });
-  }, [items, q, onlyWithImages, fromDate, toDate, selectedDistributeurs, detailsMap]);
-
-  const visible = useMemo(() => filtered.slice(0, pageSize), [filtered, pageSize]);
-
-  const stats = useMemo(() => {
-    const counts = new Map();
-    for (const it of filtered) {
-      const d = it.pubDateISO;
-      if (!d) continue;
-      counts.set(d, (counts.get(d) || 0) + 1);
-    }
-    const days = Array.from(counts.keys()).sort();
-    const tail = days.slice(-14);
-    return tail.map((d) => ({ date: d, count: counts.get(d) || 0 }));
-  }, [filtered]);
+  }, [items, q, selectedDistributeurs, detailsMap]);
 
   async function refresh() {
     setErr("");
@@ -1239,7 +1182,6 @@ export default function RappelConsoRssViewer() {
 
       setItems(withNewFlag);
       setLastUpdated(new Date().toISOString());
-      setPageSize(30);
 
       try {
         localStorage.setItem("rappelconso_rss_cache_v1", JSON.stringify({ t: Date.now(), items: parsed }));
@@ -1293,6 +1235,11 @@ export default function RappelConsoRssViewer() {
     } catch {}
 
     refresh();
+
+    const savedDistributeurs = readJsonLS(LS_SELECTED_DISTRIBUTEURS, []);
+    if (Array.isArray(savedDistributeurs)) {
+      setSelectedDistributeurs(savedDistributeurs);
+    }
 
     return () => {
       abortRef.current?.abort?.();
@@ -1364,58 +1311,18 @@ export default function RappelConsoRssViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
-  const previewUrl = useMemo(() => {
-    const secret = cronSecret.trim();
-    const params = new URLSearchParams();
-    if (secret) params.set("secret", secret);
-    const query = params.toString();
-    return query ? `/api/email-preview?${query}` : "/api/email-preview";
-  }, [cronSecret]);
+  useEffect(() => {
+    writeJsonLS(LS_SELECTED_DISTRIBUTEURS, selectedDistributeurs);
+  }, [selectedDistributeurs]);
 
-  const sendTestEmail = async () => {
-    if (testEmailSending) return;
-    setTestEmailSending(true);
-    setTestEmailStatus(null);
-    try {
-      const headers = {};
-      if (cronSecret.trim()) {
-        headers.Authorization = `Bearer ${cronSecret.trim()}`;
-      }
-      const res = await fetch("/api/test-email", {
-        method: "POST",
-        headers
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const message = payload?.error || `Request failed (${res.status})`;
-        const details = formatEmailConfig(payload?.details?.emailConfig);
-        setTestEmailStatus({
-          type: "error",
-          message,
-          details
-        });
-        return;
-      }
-      setTestEmailStatus({
-        type: "success",
-        message: `Test email sent (${payload?.emailMode || "ok"})`,
-        details: ""
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unexpected error";
-      setTestEmailStatus({ type: "error", message });
-    } finally {
-      setTestEmailSending(false);
-    }
-  };
+  const withImagesCount = useMemo(() => items.filter((x) => x.enclosureUrl).length, [items]);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto max-w-6xl px-4 py-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="space-y-1">
-            <div className="text-xl font-semibold">Rappel Conso RSS — Categorie 01</div>
+            <div className="text-xl font-semibold">Rappel Conso — Catégorie 01</div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
               {lastUpdated && <Pill>Updated: {fmtDateDMY(lastUpdated)}</Pill>}
               {prevRefreshTs && <Pill>Prev refresh: {fmtDateDMY(prevRefreshTs)}</Pill>}
@@ -1442,7 +1349,7 @@ export default function RappelConsoRssViewer() {
                 )}
                 onClick={() => setActiveTab("rss")}
               >
-                RSS dashboard
+                Rappel Conso
               </button>
               <button
                 className={classNames(
@@ -1466,46 +1373,16 @@ export default function RappelConsoRssViewer() {
               >
                 Config
               </button>
+              <a
+                href="/config"
+                className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+              >
+                Email config
+              </a>
             </div>
 
             {activeTab === "rss" && (
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  className={classNames(
-                    "rounded-xl border px-3 py-2 text-sm",
-                    mode === "gallery"
-                      ? "border-neutral-200 bg-neutral-100 text-neutral-950"
-                      : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-                  )}
-                  onClick={() => setMode("gallery")}
-                >
-                  Gallery
-                </button>
-
-                <button
-                  className={classNames(
-                    "rounded-xl border px-3 py-2 text-sm",
-                    mode === "list"
-                      ? "border-neutral-200 bg-neutral-100 text-neutral-950"
-                      : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-                  )}
-                  onClick={() => setMode("list")}
-                >
-                  List
-                </button>
-
-                <button
-                  className={classNames(
-                    "rounded-xl border px-3 py-2 text-sm",
-                    mode === "stats"
-                      ? "border-neutral-200 bg-neutral-100 text-neutral-950"
-                      : "border-neutral-700 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-                  )}
-                  onClick={() => setMode("stats")}
-                >
-                  Stats
-                </button>
-
                 <button
                   className={classNames(
                     "rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900",
@@ -1516,60 +1393,6 @@ export default function RappelConsoRssViewer() {
                 >
                   {loading ? "Refreshing…" : "Refresh"}
                 </button>
-                <a
-                  href="/config"
-                  className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
-                >
-                  Email config
-                </a>
-
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
-                  <label className="text-xs text-neutral-400" htmlFor="cron-secret">
-                    Cron secret
-                  </label>
-                  <input
-                    id="cron-secret"
-                    type="password"
-                    className="w-40 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-400"
-                    placeholder="Optional"
-                    value={cronSecret}
-                    onChange={(event) => setCronSecret(event.target.value)}
-                  />
-                  <button
-                    className={classNames(
-                      "rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900",
-                      testEmailSending && "opacity-60"
-                    )}
-                    onClick={sendTestEmail}
-                    disabled={testEmailSending}
-                  >
-                    {testEmailSending ? "Sending…" : "Send test email"}
-                  </button>
-                  <button
-                    className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-                    onClick={() => {
-                      setPreviewKey((val) => val + 1);
-                      setPreviewOpen(true);
-                    }}
-                    type="button"
-                  >
-                    Preview email
-                  </button>
-                  {testEmailStatus && (
-                    <span className="flex flex-col text-xs">
-                      <span
-                        className={classNames(
-                          testEmailStatus.type === "success" ? "text-emerald-300" : "text-rose-300"
-                        )}
-                      >
-                        {testEmailStatus.message}
-                      </span>
-                      {testEmailStatus.details && (
-                        <span className="text-neutral-400">{testEmailStatus.details}</span>
-                      )}
-                    </span>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -1577,42 +1400,13 @@ export default function RappelConsoRssViewer() {
 
         {activeTab === "rss" && (
           <>
-            <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-12">
-              <div className="md:col-span-5">
+            <div className="mt-4 grid grid-cols-1 gap-2">
+              <div>
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Search title/description/distributeur…"
                   className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-                />
-              </div>
-              <div className="md:col-span-3">
-                <label className="flex items-center gap-2 text-sm text-neutral-200">
-                  <input
-                    type="checkbox"
-                    checked={onlyWithImages}
-                    onChange={(e) => setOnlyWithImages(e.target.checked)}
-                    className="h-4 w-4 accent-neutral-200"
-                  />
-                  Only with images
-                </label>
-              </div>
-              <div className="md:col-span-2">
-                <input
-                  type="date"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-                  title="From date"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <input
-                  type="date"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-300"
-                  title="To date"
                 />
               </div>
             </div>
@@ -1641,89 +1435,34 @@ export default function RappelConsoRssViewer() {
           </div>
         )}
 
-        {activeTab === "rss" && mode === "stats" && (
-          <div className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-sm font-semibold">Items per day (last 14 days in filtered set)</div>
-              <Pill>Points: {stats.length}</Pill>
-            </div>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stats} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 12 }}
-                    tickFormatter={(v) => fmtISODateDMY(v)}
-                  />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip labelFormatter={(v) => fmtISODateDMY(v)} />
-                  <Bar dataKey="count" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "rss" && mode !== "stats" && (
+        {activeTab === "rss" && (
           <>
             <div className="mt-6">
-              {mode === "gallery" ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {visible.map((it) => {
-                    const det = detailsMap[it.id];
-                    const distLabel = pickShortDistributorLabel(det?.distributeursList, det?.distributeursRaw);
-                    const showNew = it.isNew;
-                    return (
-                      <div
-                        key={it.id}
-                        role="button"
-                        tabIndex={0}
-                        className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
-                        onClick={() => setSelected(it)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setSelected(it);
-                          }
-                        }}
-                      >
-                        <div className="relative aspect-[16/10] w-full overflow-hidden">
-                          <ImageWithFallback src={it.enclosureUrl} alt={it.title} />
-                          {(showNew || it.link) && (
-                            <div className="absolute right-2 top-2 flex items-center gap-2">
-                              {showNew && <NewPill />}
-                              {it.link && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setFicheUrl(it.link);
-                                    setFicheOpen(true);
-                                  }}
-                                  className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
-                                  title="Open fiche inside app"
-                                >
-                                  Fiche
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2 p-4">
-                          <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
-                            {it.title || "(no title)"}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-                            {it.pubDate && <Pill>{fmtDateDMY(it.pubDate)}</Pill>}
-                            {it.enclosureUrl && <Pill>image</Pill>}
-                            {distLabel && <Pill>{distLabel}</Pill>}
-                          </div>
-                          <div className="text-xs text-neutral-300/80 line-clamp-3">{it.descriptionText}</div>
-
-                          {it.link && (
-                            <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filtered.map((it) => {
+                  const det = detailsMap[it.id];
+                  const distLabel = pickShortDistributorLabel(det?.distributeursList, det?.distributeursRaw);
+                  const showNew = it.isNew;
+                  return (
+                    <div
+                      key={it.id}
+                      role="button"
+                      tabIndex={0}
+                      className="group overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-left shadow-sm transition hover:border-neutral-600"
+                      onClick={() => setSelected(it)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelected(it);
+                        }
+                      }}
+                    >
+                      <div className="relative aspect-[16/10] w-full overflow-hidden">
+                        <ImageWithFallback src={it.enclosureUrl} alt={it.title} />
+                        {(showNew || it.link) && (
+                          <div className="absolute right-2 top-2 flex items-center gap-2">
+                            {showNew && <NewPill />}
+                            {it.link && (
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1731,52 +1470,29 @@ export default function RappelConsoRssViewer() {
                                   setFicheUrl(it.link);
                                   setFicheOpen(true);
                                 }}
-                                className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
+                                className="rounded-xl border border-neutral-700 bg-neutral-950/80 px-3 py-1 text-xs text-neutral-100 hover:bg-neutral-900"
+                                title="Open fiche inside app"
                               >
-                                Open fiche
+                                Fiche
                               </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  copyText(it.link).then(() => setToast("Link copied"));
-                                }}
-                                className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
-                              >
-                                Copy link
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {visible.map((it) => {
-                    const det = detailsMap[it.id];
-                    const distLabel = pickShortDistributorLabel(det?.distributeursList, det?.distributeursRaw);
-                    return (
-                      <div key={it.id} className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
-                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-neutral-100">{it.title || "(no title)"}</div>
-                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-                              {it.pubDate && <Pill>{fmtDateDMY(it.pubDate)}</Pill>}
-                              {it.enclosureUrl && <Pill>image</Pill>}
-                              {distLabel && <Pill>{distLabel}</Pill>}
-                            </div>
-                            <div className="mt-2 text-sm text-neutral-300/90 line-clamp-3">{it.descriptionText}</div>
+                            )}
                           </div>
+                        )}
+                      </div>
 
-                          <div className="flex items-center gap-2">
-                            <button
-                              className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
-                              onClick={() => setSelected(it)}
-                            >
-                              Details
-                            </button>
+                      <div className="space-y-2 p-4">
+                        <div className="text-sm font-semibold text-neutral-100 line-clamp-2">
+                          {it.title || "(no title)"}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+                          {it.pubDate && <Pill>{fmtDateDMY(it.pubDate)}</Pill>}
+                          {it.enclosureUrl && <Pill>image</Pill>}
+                          {distLabel && <Pill>{distLabel}</Pill>}
+                        </div>
+                        <div className="text-xs text-neutral-300/80 line-clamp-3">{it.descriptionText}</div>
+
+                        {it.link && (
+                          <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1784,30 +1500,27 @@ export default function RappelConsoRssViewer() {
                                 setFicheUrl(it.link);
                                 setFicheOpen(true);
                               }}
-                              className="rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+                              className="inline-flex items-center gap-2 text-neutral-200 underline decoration-neutral-700 hover:decoration-neutral-300"
                             >
                               Open fiche
                             </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyText(it.link).then(() => setToast("Link copied"));
+                              }}
+                              className="inline-flex items-center gap-2 text-neutral-300 underline decoration-neutral-800 hover:decoration-neutral-400"
+                            >
+                              Copy link
+                            </button>
                           </div>
-                        </div>
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6 flex items-center justify-center">
-              {pageSize < filtered.length ? (
-                <button
-                  className="rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
-                  onClick={() => setPageSize((n) => Math.min(n + 30, filtered.length))}
-                >
-                  Load more ({Math.max(0, filtered.length - pageSize)} remaining)
-                </button>
-              ) : (
-                <div className="text-xs text-neutral-500">End of results</div>
-              )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </>
         )}
@@ -1986,29 +1699,6 @@ export default function RappelConsoRssViewer() {
             ) : (
               <div className="p-6 text-sm text-neutral-400">No fiche URL</div>
             )}
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Email preview">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-            <span>Preview is rendered from the email template.</span>
-            <button
-              type="button"
-              className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-900"
-              onClick={() => setPreviewKey((val) => val + 1)}
-            >
-              Reload preview
-            </button>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-neutral-800">
-            <iframe
-              key={previewKey}
-              title="email-preview"
-              src={previewUrl}
-              className="h-[75vh] w-full bg-white"
-            />
           </div>
         </div>
       </Modal>
